@@ -63,7 +63,7 @@ def save_pets(data):
 
 def load_titles():
     default_titles = {
-        "1": {"icon": "👑", "name": "Đoàn Trưởng"},
+        "1": {"icon": "👑", "name": "Quỷ Thần"},
         "2": {"icon": "⚔️", "name": "Thần Thương"},
         "3": {"icon": "🐎", "name": "Kị Vương"}
     }
