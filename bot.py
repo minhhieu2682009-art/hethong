@@ -5,8 +5,16 @@ import random
 import json
 import os
 import time
+from datetime import datetime, timezone, timedelta
 from flask import Flask
 from threading import Thread
+
+# ==============================================================================
+# --- 0. CẤU HÌNH ROLE TOP 1, 2, 3 (THAY ID ROLE THẬT CỦA BẠN VÀO ĐÂY) ---
+# ==============================================================================
+ROLE_TOP1_ID = 123456789012345678  # Thay bằng ID Role Top 1 trong Discord của bạn
+ROLE_TOP2_ID = 123456789012345678  # Thay bằng ID Role Top 2 trong Discord của bạn
+ROLE_TOP3_ID = 123456789012345678  # Thay bằng ID Role Top 3 trong Discord của bạn
 
 # --- 1. WEB SERVER GIỮ BOT ONLINE TRÊN RENDER ---
 app = Flask('')
@@ -81,7 +89,72 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ID Kênh phát trò chơi tự động mỗi 30 phút
 GAME_CHANNEL_ID = None
 
+# --- HÀM XỬ LÝ TRAO ROLE TOP & RESET ĐIỂM TUẦN ---
+async def process_weekly_rewards():
+    data = load_data()
+    if not data:
+        return "Không có dữ liệu điểm tuần."
+
+    # Sắp xếp lấy Top 3 người cao điểm nhất
+    sorted_users = sorted(data.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:3]
+    
+    summary_msg = "🏆 **KẾT QUẢ VÀ TỰ ĐỘNG TRAO ROLE TOP TUẦN:**\n"
+    
+    for guild in bot.guilds:
+        roles = [
+            guild.get_role(ROLE_TOP1_ID),
+            guild.get_role(ROLE_TOP2_ID),
+            guild.get_role(ROLE_TOP3_ID)
+        ]
+        
+        # 1. Gỡ Role Top cũ của tất cả thành viên trong Server
+        for role in roles:
+            if role:
+                for member in role.members:
+                    try:
+                        await member.remove_roles(role)
+                    except Exception as e:
+                        print(f"Lỗi gỡ role {role.name} từ {member.display_name}: {e}")
+
+        # 2. Trao Role Top mới cho Top 1, 2, 3
+        for index, (u_id, score) in enumerate(sorted_users):
+            member = guild.get_member(int(u_id))
+            target_role = roles[index] if index < len(roles) else None
+            
+            if member:
+                if target_role:
+                    try:
+                        await member.add_roles(target_role)
+                    except Exception as e:
+                        print(f"Lỗi trao role cho {member.display_name}: {e}")
+                summary_msg += f"🥇 **Top {index+1}:** {member.mention} (`{score.get('weekly', 0)} điểm`)\n"
+
+    # 3. Reset điểm tuần của tất cả mọi người về 0 (Giữ nguyên tổng điểm total)
+    for u_id in data:
+        data[u_id]["weekly"] = 0
+    save_data(data)
+    
+    return summary_msg
+
 # --- 4. TÁC VỤ TỰ ĐỘNG (BACKGROUND TASKS) ---
+
+# Tự động kiểm tra & trao Role Top + Reset điểm lúc 00:00 sáng Thứ Hai (Giờ VN)
+@tasks.loop(minutes=1)
+async def auto_reset_weekly_top():
+    vietnam_tz = timezone(timedelta(hours=7))
+    now = datetime.now(vietnam_tz)
+    
+    # Kiểm tra đúng 00:00 AM vào Thứ Hai (Monday = 0)
+    if now.weekday() == 0 and now.hour == 0 and now.minute == 0:
+        print("⏰ Đến 00:00 Thứ Hai! Đang tự động trao Role Top và Reset điểm tuần...")
+        msg = await process_weekly_rewards()
+        
+        # Nếu đã cài đặt kênh game, thông báo kết quả vào kênh đó
+        global GAME_CHANNEL_ID
+        if GAME_CHANNEL_ID:
+            channel = bot.get_channel(GAME_CHANNEL_ID)
+            if channel:
+                await channel.send(f"🎉 **ĐÃ TỰ ĐỘNG CHỐT BẢNG XẾP HẠNG TUẦN!** 🎉\n\n{msg}")
 
 # Tự động cộng điểm Voice (mỗi 5 phút +5 điểm)
 @tasks.loop(minutes=5)
@@ -153,6 +226,8 @@ async def on_ready():
         check_voice_points.start()
     if not auto_minigame_task.is_running():
         auto_minigame_task.start()
+    if not auto_reset_weekly_top.is_running():
+        auto_reset_weekly_top.start()
         
     try:
         synced = await bot.tree.sync()
@@ -178,7 +253,14 @@ async def on_message(message):
 
 # --- 6. CÁC LỆNH SLASH (COMMANDS) ---
 
-@bot.tree.command(name="set_top_title", description="[ADMIN] Đổi danh hiệu và biểu tượng cho Top 1, 2 hoặc 3")
+@bot.tree.command(name="reset_week_manual", description="[ADMIN] Ép trao Role Top 1, 2, 3 và reset điểm tuần ngay lập tức")
+@app_commands.checks.has_permissions(administrator=True)
+async def reset_week_manual(interaction: discord.Interaction):
+    await interaction.response.defer()
+    msg = await process_weekly_rewards()
+    await interaction.followup.send(f"✅ **ĐÃ THỰC HIỆN RESET TUẦN THỦ CÔNG:**\n{msg}")
+
+@bot.tree.command(name="set_top_title", description="[ADMIN] Đổi danh hiệu và biểu tượng hiển thị cho Top 1, 2 hoặc 3")
 @app_commands.checks.has_permissions(administrator=True)
 @app_commands.choices(top=[
     app_commands.Choice(name="Top 1", value=1),
@@ -277,13 +359,13 @@ async def point_edit(interaction: discord.Interaction, user: discord.User, amoun
     new_score = add_points(str(user.id), amount)
     await interaction.response.send_message(f"✅ Đã chỉnh điểm cho {user.mention}. Điểm tuần mới: `{new_score}`.")
 
-@bot.tree.command(name="danhhieu_grant", description="[ADMIN] Trao danh hiệu cho thành viên")
+@bot.tree.command(name="danhhieu_grant", description="[ADMIN] Trao danh hiệu thủ công cho thành viên")
 @app_commands.checks.has_permissions(administrator=True)
 async def danhhieu_grant(interaction: discord.Interaction, user: discord.Member, role: discord.Role):
     await user.add_roles(role)
     await interaction.response.send_message(f"🎉 Đã trao danh hiệu **{role.name}** cho {user.mention}!")
 
-@bot.tree.command(name="danhhieu_revoke", description="[ADMIN] Thu hồi danh hiệu của thành viên")
+@bot.tree.command(name="danhhieu_revoke", description="[ADMIN] Thu hồi danh hiệu thủ công của thành viên")
 @app_commands.checks.has_permissions(administrator=True)
 async def danhhieu_revoke(interaction: discord.Interaction, user: discord.Member, role: discord.Role):
     await user.remove_roles(role)
