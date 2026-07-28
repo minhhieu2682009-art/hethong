@@ -12,9 +12,9 @@ from threading import Thread
 # ==============================================================================
 # --- 0. CẤU HÌNH ROLE TOP 1, 2, 3 (THAY ID ROLE THẬT CỦA BẠN VÀO ĐÂY) ---
 # ==============================================================================
-ROLE_TOP1_ID = 123456789012345678  # Thay bằng ID Role Top 1 trong Discord của bạn
-ROLE_TOP2_ID = 123456789012345678  # Thay bằng ID Role Top 2 trong Discord của bạn
-ROLE_TOP3_ID = 123456789012345678  # Thay bằng ID Role Top 3 trong Discord của bạn
+ROLE_TOP1_ID = 123456789012345678  # Thay bằng ID Role Top 1 (Đoàn Trưởng) của bạn
+ROLE_TOP2_ID = 123456789012345678  # Thay bằng ID Role Top 2 của bạn
+ROLE_TOP3_ID = 123456789012345678  # Thay bằng ID Role Top 3 của bạn
 
 # --- 1. WEB SERVER GIỮ BOT ONLINE TRÊN RENDER ---
 app = Flask('')
@@ -49,7 +49,7 @@ def save_data(data):
 
 def load_titles():
     default_titles = {
-        "1": {"icon": "👹", "name": "Quỷ Thần"},
+        "1": {"icon": "👑", "name": "Đoàn Trưởng"},
         "2": {"icon": "⚔️", "name": "Thần Thương"},
         "3": {"icon": "🐎", "name": "Kị Vương"}
     }
@@ -86,7 +86,7 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ID Kênh phát trò chơi tự động mỗi 30 phút
+# ID Kênh phát trò chơi & thông báo bảng xếp hạng
 GAME_CHANNEL_ID = None
 
 # --- HÀM XỬ LÝ TRAO ROLE TOP & RESET ĐIỂM TUẦN ---
@@ -138,6 +138,47 @@ async def process_weekly_rewards():
 
 # --- 4. TÁC VỤ TỰ ĐỘNG (BACKGROUND TASKS) ---
 
+# TỰ ĐỘNG GỬI BẢNG XẾP HẠNG MỖI NGÀY LÚC 08:00 SÁNG (GIỜ VN)
+@tasks.loop(minutes=1)
+async def auto_daily_leaderboard():
+    vietnam_tz = timezone(timedelta(hours=7))
+    now = datetime.now(vietnam_tz)
+    
+    # Kiểm tra đúng 08:00 AM hàng ngày
+    if now.hour == 8 and now.minute == 0:
+        global GAME_CHANNEL_ID
+        if not GAME_CHANNEL_ID:
+            return
+            
+        channel = bot.get_channel(GAME_CHANNEL_ID)
+        if not channel:
+            return
+            
+        data = load_data()
+        titles = load_titles()
+        sorted_users = sorted(data.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:10]
+        
+        embed = discord.Embed(
+            title="☀️ BẢNG XẾP HẠNG ĐIỂM TUẦN (CẬP NHẬT MỖI NGÀY) ☀️", 
+            color=discord.Color.gold()
+        )
+        
+        description = ""
+        for index, (u_id, score) in enumerate(sorted_users, 1):
+            user = bot.get_user(int(u_id))
+            name = user.name if user else f"User ID: {u_id}"
+            
+            icon = "🔹"
+            if str(index) in titles:
+                t_icon = titles[str(index)]["icon"]
+                t_name = titles[str(index)]["name"]
+                icon = f"{t_icon} **[Top {index} - {t_name}]**"
+            
+            description += f"{index}. {icon} {name} — `{score.get('weekly', 0)} điểm`\n"
+            
+        embed.description = description if description else "Chưa có dữ liệu điểm tuần này."
+        await channel.send(embed=embed)
+
 # Tự động kiểm tra & trao Role Top + Reset điểm lúc 00:00 sáng Thứ Hai (Giờ VN)
 @tasks.loop(minutes=1)
 async def auto_reset_weekly_top():
@@ -149,7 +190,6 @@ async def auto_reset_weekly_top():
         print("⏰ Đến 00:00 Thứ Hai! Đang tự động trao Role Top và Reset điểm tuần...")
         msg = await process_weekly_rewards()
         
-        # Nếu đã cài đặt kênh game, thông báo kết quả vào kênh đó
         global GAME_CHANNEL_ID
         if GAME_CHANNEL_ID:
             channel = bot.get_channel(GAME_CHANNEL_ID)
@@ -228,6 +268,8 @@ async def on_ready():
         auto_minigame_task.start()
     if not auto_reset_weekly_top.is_running():
         auto_reset_weekly_top.start()
+    if not auto_daily_leaderboard.is_running():
+        auto_daily_leaderboard.start()
         
     try:
         synced = await bot.tree.sync()
@@ -275,12 +317,12 @@ async def set_top_title(interaction: discord.Interaction, top: app_commands.Choi
     
     await interaction.response.send_message(f"✅ Đã đổi danh hiệu **Top {top.value}** thành: {icon} **[{title_name}]**!")
 
-@bot.tree.command(name="set_game_channel", description="[ADMIN] Đặt kênh tự động xuất hiện Mini-game mỗi 30 phút")
+@bot.tree.command(name="set_game_channel", description="[ADMIN] Đặt kênh tự động phát Mini-game và gửi BXH mỗi ngày")
 @app_commands.checks.has_permissions(administrator=True)
 async def set_game_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     global GAME_CHANNEL_ID
     GAME_CHANNEL_ID = channel.id
-    await interaction.response.send_message(f"✅ Đã chọn kênh **{channel.mention}** làm nơi tự động phát Mini-game mỗi 30 phút!")
+    await interaction.response.send_message(f"✅ Đã chọn kênh **{channel.mention}** làm nơi phát Mini-game và tự động thông báo BXH!")
 
 @bot.tree.command(name="dovui", description="Trả lời đố vui nhận điểm thưởng!")
 async def dovui(interaction: discord.Interaction):
