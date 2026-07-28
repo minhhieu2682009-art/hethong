@@ -12,7 +12,7 @@ from threading import Thread
 # ==============================================================================
 # --- 0. CẤU HÌNH ROLE TOP 1, 2, 3 (THAY ID ROLE THẬT CỦA BẠN VÀO ĐÂY) ---
 # ==============================================================================
-ROLE_TOP1_ID = 123456789012345678  # Thay bằng ID Role Top 1 của bạn
+ROLE_TOP1_ID = 123456789012345678  # Thay bằng ID Role Top 1 (Đoàn Trưởng) của bạn
 ROLE_TOP2_ID = 123456789012345678  # Thay bằng ID Role Top 2 của bạn
 ROLE_TOP3_ID = 123456789012345678  # Thay bằng ID Role Top 3 của bạn
 
@@ -30,7 +30,7 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# --- 2. QUẢN LÝ DỮ LIỆU LƯU FILE JSON ---
+# --- 2. QUẢN LÝ DỮ LIỆU ĐIỂM & DANH HIỆU (LƯU FILE JSON) ---
 DATA_FILE = "user_points.json"
 TITLES_FILE = "titles_config.json"
 PETS_FILE = "user_pets.json"
@@ -89,19 +89,11 @@ def add_points(user_id: str, amount: int):
     save_data(data)
     return data[user_id]["weekly"]
 
-def get_user_points(user_id: str):
-    data = load_data()
-    if user_id not in data:
-        return 0
-    return data[user_id].get("weekly", 0)
-
-# Biến lưu thời gian cooldown
+# Biến lưu thời gian cooldown nhắn tin của từng người dùng
 chat_cooldowns = {}
-rob_cooldowns = {}
-dovui_cooldowns = {}
 
 # ==============================================================================
-# --- DANH SÁCH CÂU HỎI ĐỐ VUI MẸO & TOÁN HỌC TỦY CHỈNH ---
+# --- DANH SÁCH CÂU HỎI ĐỐ VUI MẸO & TOÁN HỌC ---
 # ==============================================================================
 CUSTOM_TRIVIA = [
     {
@@ -150,6 +142,7 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# ID Kênh phát trò chơi & thông báo bảng xếp hạng
 GAME_CHANNEL_ID = None
 
 # --- HÀM XỬ LÝ TRAO ROLE TOP & RESET ĐIỂM TUẦN ---
@@ -158,7 +151,9 @@ async def process_weekly_rewards():
     if not data:
         return "Không có dữ liệu điểm tuần."
 
+    # Sắp xếp lấy Top 3 người cao điểm nhất
     sorted_users = sorted(data.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:3]
+    
     summary_msg = "🏆 **KẾT QUẢ VÀ TỰ ĐỘNG TRAO ROLE TOP TUẦN:**\n"
     
     for guild in bot.guilds:
@@ -168,14 +163,16 @@ async def process_weekly_rewards():
             guild.get_role(ROLE_TOP3_ID)
         ]
         
+        # 1. Gỡ Role Top cũ của tất cả thành viên trong Server
         for role in roles:
             if role:
                 for member in role.members:
                     try:
                         await member.remove_roles(role)
                     except Exception as e:
-                        print(f"Lỗi gỡ role: {e}")
+                        print(f"Lỗi gỡ role {role.name} từ {member.display_name}: {e}")
 
+        # 2. Trao Role Top mới cho Top 1, 2, 3
         for index, (u_id, score) in enumerate(sorted_users):
             member = guild.get_member(int(u_id))
             target_role = roles[index] if index < len(roles) else None
@@ -185,22 +182,25 @@ async def process_weekly_rewards():
                     try:
                         await member.add_roles(target_role)
                     except Exception as e:
-                        print(f"Lỗi trao role: {e}")
+                        print(f"Lỗi trao role cho {member.display_name}: {e}")
                 summary_msg += f"🥇 **Top {index+1}:** {member.mention} (`{score.get('weekly', 0)} điểm`)\n"
 
+    # 3. Reset điểm tuần của tất cả mọi người về 0 (Giữ nguyên tổng điểm total)
     for u_id in data:
         data[u_id]["weekly"] = 0
     save_data(data)
     
     return summary_msg
 
-# --- 4. TÁC VỤ TỰ ĐỘNG ---
+# --- 4. TÁC VỤ TỰ ĐỘNG (BACKGROUND TASKS) ---
 
+# TỰ ĐỘNG GỬI BẢNG XẾP HẠNG MỖI NGÀY LÚC 08:00 SÁNG (GIỜ VN)
 @tasks.loop(minutes=1)
 async def auto_daily_leaderboard():
     vietnam_tz = timezone(timedelta(hours=7))
     now = datetime.now(vietnam_tz)
     
+    # Kiểm tra đúng 08:00 AM hàng ngày
     if now.hour == 8 and now.minute == 0:
         global GAME_CHANNEL_ID
         if not GAME_CHANNEL_ID:
@@ -235,19 +235,24 @@ async def auto_daily_leaderboard():
         embed.description = description if description else "Chưa có dữ liệu điểm tuần này."
         await channel.send(embed=embed)
 
+# Tự động kiểm tra & trao Role Top + Reset điểm lúc 00:00 sáng Thứ Hai (Giờ VN)
 @tasks.loop(minutes=1)
 async def auto_reset_weekly_top():
     vietnam_tz = timezone(timedelta(hours=7))
     now = datetime.now(vietnam_tz)
     
+    # Kiểm tra đúng 00:00 AM vào Thứ Hai (Monday = 0)
     if now.weekday() == 0 and now.hour == 0 and now.minute == 0:
+        print("⏰ Đến 00:00 Thứ Hai! Đang tự động trao Role Top và Reset điểm tuần...")
         msg = await process_weekly_rewards()
+        
         global GAME_CHANNEL_ID
         if GAME_CHANNEL_ID:
             channel = bot.get_channel(GAME_CHANNEL_ID)
             if channel:
                 await channel.send(f"🎉 **ĐÃ TỰ ĐỘNG CHỐT BẢNG XẾP HẠNG TUẦN!** 🎉\n\n{msg}")
 
+# Tự động cộng điểm Voice (mỗi 5 phút +5 điểm)
 @tasks.loop(minutes=5)
 async def check_voice_points():
     for guild in bot.guilds:
@@ -256,6 +261,7 @@ async def check_voice_points():
             for member in members:
                 add_points(str(member.id), 5)
 
+# Tự động phát Mini-game ngẫu nhiên mỗi 30 phút
 @tasks.loop(minutes=30)
 async def auto_minigame_task():
     global GAME_CHANNEL_ID
@@ -312,7 +318,7 @@ async def auto_minigame_task():
     try:
         msg = await bot.wait_for('message', timeout=30.0, check=check)
         new_score = add_points(str(msg.author.id), 30)
-        await channel.send(f"🎉 Chúc mừng {msg.author.mention} đã trả lời đúng! Bạn nhận **+30 điểm** (Tổng điểm tuần: `{new_score}`).")
+        await channel.send(f"🎉 Chúc mừng {msg.author.mention} đã trả lời đúng nhanh nhất! Bạn nhận **+30 điểm** (Tổng điểm tuần: `{new_score}`).")
     except Exception:
         first_ans = valid_ans[0] if isinstance(valid_ans, list) else valid_ans
         await channel.send(f"⏰ Đã hết 30 giây! Đáp án đúng là: **{first_ans}**")
@@ -320,6 +326,7 @@ async def auto_minigame_task():
 @bot.event
 async def on_ready():
     print(f"Bot đã online: {bot.user}")
+    
     if not check_voice_points.is_running():
         check_voice_points.start()
     if not auto_minigame_task.is_running():
@@ -335,6 +342,7 @@ async def on_ready():
     except Exception as e:
         print(f"Lỗi sync: {e}")
 
+# --- 5. TỰ ĐỘNG CỘNG ĐIỂM CHAT ---
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
@@ -350,245 +358,7 @@ async def on_message(message):
         
     await bot.process_commands(message)
 
-
-# ==============================================================================
-# --- 5. HỆ THỐNG MINI GAME & TƯƠNG TÁC ---
-# ==============================================================================
-
-# 1. LỆNH ĐỐ VUI CHỦ ĐỘNG (/dovui)
-@bot.tree.command(name="dovui", description="Thử thách đố vui cá nhân để tích điểm tuần (Thời gian chờ: 60s)")
-async def dovui(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    current_time = time.time()
-    
-    if user_id in dovui_cooldowns and (current_time - dovui_cooldowns[user_id]) < 60:
-        remaining = int(60 - (current_time - dovui_cooldowns[user_id]))
-        await interaction.response.send_message(f"⏳ Bạn cần chờ `{remaining} giây` nữa mới có thể tiếp tục chơi đố vui!", ephemeral=True)
-        return
-        
-    dovui_cooldowns[user_id] = current_time
-    
-    game_type = random.choice(["custom_trivia", "math", "word", "fast_type"])
-    
-    if game_type == "custom_trivia":
-        item = random.choice(CUSTOM_TRIVIA)
-        valid_ans = item["a"]
-        question_text = f"❓ **Câu hỏi đố vui:** {item['q']}"
-    elif game_type == "math":
-        a, b = random.randint(10, 99), random.randint(10, 99)
-        valid_ans = [str(a + b)]
-        question_text = f"🧮 **Tính nhanh:** `{a} + {b} = ?`"
-    elif game_type == "word":
-        words = ["genshin", "valorant", "minecraft", "roblox", "python", "discord", "system", "gaming"]
-        target = random.choice(words)
-        scrambled = "".join(random.sample(target, len(target)))
-        valid_ans = [target]
-        question_text = f"🔤 **Giải mã từ bị xáo trộn:** `{scrambled}`"
-    else:
-        words = ["HE THONG DISCORD", "QUY THAN", "THAN THUONG", "KI VUONG", "DISCORD BOT"]
-        target = random.choice(words)
-        valid_ans = [target.lower()]
-        question_text = f"⚡ **Gõ lại chính xác cụm từ sau:** `{target}`"
-
-    embed = discord.Embed(
-        title="🧩 THỬ THÁCH ĐỐ VUI",
-        description=f"{question_text}\n\n👉 Nhập câu trả lời của bạn trực tiếp vào kênh chat trong vòng **20 giây**! (Phần thưởng: **+20 điểm**)",
-        color=discord.Color.blue()
-    )
-    await interaction.response.send_message(embed=embed)
-    
-    def check(m):
-        return m.channel == interaction.channel and m.author == interaction.user and m.content.strip().lower() in [ans.lower() for ans in valid_ans]
-
-    try:
-        msg = await bot.wait_for('message', timeout=20.0, check=check)
-        new_score = add_points(user_id, 20)
-        await interaction.channel.send(f"🎉 Chúc mừng {interaction.user.mention} trả lời chính xác! Nhận ngay **+20 điểm** (Tổng điểm: `{new_score}`).")
-    except Exception:
-        first_ans = valid_ans[0] if isinstance(valid_ans, list) else valid_ans
-        await interaction.channel.send(f"⏰ {interaction.user.mention} đã hết thời gian hoặc trả lời sai! Đáp án đúng là: **{first_ans}**.")
-
-
-# 2. LỆNH CƯỚP ĐIỂM (/cuop)
-@bot.tree.command(name="cuop", description="Thử vận may cướp điểm tuần của người chơi khác!")
-async def cuop(interaction: discord.Interaction, victim: discord.Member):
-    user_id = str(interaction.user.id)
-    victim_id = str(victim.id)
-    current_time = time.time()
-    
-    if victim.bot or victim == interaction.user:
-        await interaction.response.send_message("❌ Bạn không thể cướp điểm từ bot hoặc chính bản thân mình!", ephemeral=True)
-        return
-
-    if user_id in rob_cooldowns and (current_time - rob_cooldowns[user_id]) < 300:
-        remaining = int(300 - (current_time - rob_cooldowns[user_id]))
-        await interaction.response.send_message(f"🚔 Công an đang tuần tra! Hãy đợi `{remaining} giây` nữa rồi mới đi cướp tiếp.", ephemeral=True)
-        return
-
-    victim_pts = get_user_points(victim_id)
-    if victim_pts < 20:
-        await interaction.response.send_message(f"❌ {victim.mention} quá nghèo (dưới 20 điểm tuần), không đáng để cướp!", ephemeral=True)
-        return
-
-    rob_cooldowns[user_id] = current_time
-    
-    success = random.choice([True, False])
-    
-    if success:
-        percent = random.randint(10, 25)
-        stolen_pts = int(victim_pts * (percent / 100))
-        if stolen_pts < 1:
-            stolen_pts = 1
-            
-        add_points(victim_id, -stolen_pts)
-        add_points(user_id, stolen_pts)
-        await interaction.response.send_message(f"🥷 {interaction.user.mention} đã ra tay cướp thành công **{stolen_pts} điểm tuần** từ {victim.mention}!")
-    else:
-        penalty = 15
-        add_points(user_id, -penalty)
-        add_points(victim_id, penalty)
-        await interaction.response.send_message(f"🚨 {interaction.user.mention} đi cướp điểm của {victim.mention} nhưng bị bắt quả tang! Bị phạt đền **{penalty} điểm tuần** cho nạn nhân.")
-
-
-# 3. HỆ THỐNG NUÔI THÚ ẢO (/nuoithu)
-@bot.tree.command(name="nuoithu", description="Hệ thống nuôi thú ảo, cho ăn và đi săn điểm!")
-@app_commands.choices(hanhdong=[
-    app_commands.Choice(name="Nhận/Xem Thú", value="xem"),
-    app_commands.Choice(name="Cho Thú Ăn (-20 điểm)", value="an"),
-    app_commands.Choice(name="Cho Thú Đi Săn Thưởng", value="san")
-])
-async def nuoithu(interaction: discord.Interaction, hanhdong: app_commands.Choice[str]):
-    user_id = str(interaction.user.id)
-    pets = load_pets()
-    
-    if hanhdong.value == "xem":
-        if user_id not in pets:
-            pets[user_id] = {"name": "Trứng Bí Ẩn", "level": 1, "exp": 0, "icon": "🥚"}
-            save_pets(pets)
-            await interaction.response.send_message("🐣 Bạn vừa nhận được một Quả Trứng Bí Ẩn! Hãy tích cực cho ăn và chăm sóc để trứng nở thành Thú cưng nhé.")
-        else:
-            p = pets[user_id]
-            await interaction.response.send_message(f"🐾 **Thú Cưng Của Bạn:**\n- Tên/Loài: {p['icon']} **{p['name']}**\n- Cấp độ (Level): `{p['level']}`\n- Điểm kinh nghiệm (EXP): `{p['exp']}/100`")
-            
-    elif hanhdong.value == "an":
-        if user_id not in pets:
-            await interaction.response.send_message("❌ Bạn chưa có thú cưng! Hãy chọn hành động 'Nhận/Xem Thú' trước.")
-            return
-        
-        current_pts = get_user_points(user_id)
-        if current_pts < 20:
-            await interaction.response.send_message("❌ Bạn không đủ **20 điểm tuần** để mua thức ăn cho thú!")
-            return
-            
-        add_points(user_id, -20)
-        p = pets[user_id]
-        p['exp'] += 35
-        
-        msg = f"🍖 Bạn đã cho **{p['name']}** ăn thành công (-20 điểm tuần). Thú cưng nhận thêm `+35 EXP`!"
-        if p['exp'] >= 100:
-            p['level'] += 1
-            p['exp'] = 0
-            if p['level'] == 2:
-                p['name'] = "Hỏa Long Nhỏ"
-                p['icon'] = "🐉"
-            elif p['level'] >= 3:
-                p['name'] = "Thần Long Tối Thượng"
-                p['icon'] = "👑🐉"
-            msg += f"\n🎉 **CHÚC MỪNG!** Thú cưng của bạn đã tiến hóa lên cấp **{p['level']}** (`{p['name']}`)!"
-            
-        save_pets(pets)
-        await interaction.response.send_message(msg)
-        
-    elif hanhdong.value == "san":
-        if user_id not in pets:
-            await interaction.response.send_message("❌ Bạn chưa có thú cưng!")
-            return
-        p = pets[user_id]
-        reward = random.randint(10, 40) * p['level']
-        add_points(user_id, reward)
-        await interaction.response.send_message(f"🗡️ Thú cưng {p['icon']} **{p['name']}** của bạn đã xuất kích đi săn và mang về **+{reward} điểm tuần** cho chủ nhân!")
-
-
-# 4. HỆ THỐNG CƯỢC ĐIỂM (/cuocdiem)
-@bot.tree.command(name="cuocdiem", description="Cược điểm may rủi: Chọn Tài/Xỉu!")
-@app_commands.choices(luachon=[
-    app_commands.Choice(name="Tài (Tổng điểm xúc sắc từ 11 đến 18)", value="tai"),
-    app_commands.Choice(name="Xỉu (Tổng điểm xúc sắc từ 3 đến 10)", value="xiu")
-])
-async def cuocdiem(interaction: discord.Interaction, sodiem_cuoc: int, luachon: app_commands.Choice[str]):
-    user_id = str(interaction.user.id)
-    current_pts = get_user_points(user_id)
-    
-    if sodiem_cuoc <= 0:
-        await interaction.response.send_message("❌ Số điểm cược phải lớn hơn 0!")
-        return
-    if current_pts < sodiem_cuoc:
-        await interaction.response.send_message(f"❌ Bạn không đủ điểm! Điểm tuần hiện tại của bạn chỉ có: `{current_pts}`.")
-        return
-        
-    d1, d2, d3 = random.randint(1, 6), random.randint(1, 6), random.randint(1, 6)
-    total = d1 + d2 + d3
-    result = "tai" if total >= 11 else "xiu"
-    
-    dice_str = f"🎲 Kết quả xúc sắc: **{d1} - {d2} - {d3}** (Tổng: **{total}**)"
-    
-    if luachon.value == result:
-        add_points(user_id, sodiem_cuoc)
-        await interaction.response.send_message(f"{dice_str}\n🎉 **CHIẾN THẮNG!** Bạn đoán chính xác và nhận thêm **+{sodiem_cuoc} điểm tuần**!")
-    else:
-        add_points(user_id, -sodiem_cuoc)
-        await interaction.response.send_message(f"{dice_str}\n😢 **THẠT TIẾC!** Bạn đoán sai và mất **-{sodiem_cuoc} điểm tuần**.")
-
-
-# 5. HỆ THỐNG CỜ VUA MINI TƯƠNG TÁC BUTTON (/covua)
-class ChessView(discord.ui.View):
-    def __init__(self, p1: discord.Member, p2: discord.Member):
-        super().__init__(timeout=120)
-        self.p1 = p1
-        self.p2 = p2
-        self.turn = p1
-
-    @discord.ui.button(label="Đi Nước 1 (Tấn Công)", style=discord.ButtonStyle.green)
-    async def move_1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.turn:
-            await interaction.response.send_message("⏳ Chưa tới lượt của bạn!", ephemeral=True)
-            return
-        self.turn = self.p2 if self.turn == self.p1 else self.p1
-        await interaction.response.edit_message(content=f"♟️ **Cờ Vua Mini:** {interaction.user.mention} vừa đi một nước cờ hiểm hóc!\n👉 **Lượt tiếp theo:** {self.turn.mention}")
-
-    @discord.ui.button(label="Đi Nước 2 (Phòng Thủ)", style=discord.ButtonStyle.blurple)
-    async def move_2(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.turn:
-            await interaction.response.send_message("⏳ Chưa tới lượt của bạn!", ephemeral=True)
-            return
-        self.turn = self.p2 if self.turn == self.p1 else self.p1
-        await interaction.response.edit_message(content=f"♟️ **Cờ Vua Mini:** {interaction.user.mention} thiết lập thế trận phòng thủ vững chắc!\n👉 **Lượt tiếp theo:** {self.turn.mention}")
-
-    @discord.ui.button(label="Đầu Hàng", style=discord.ButtonStyle.red)
-    async def surrender(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.p1 and interaction.user != self.p2:
-            await interaction.response.send_message("❌ Bạn không phải người chơi trong bàn cờ này!", ephemeral=True)
-            return
-        winner = self.p2 if interaction.user == self.p1 else self.p1
-        for child in self.children:
-            child.disabled = True
-        await interaction.response.edit_message(content=f"🏳️ {interaction.user.mention} đã đầu hàng! Chúc mừng **{winner.mention}** giành chiến thắng!", view=self)
-        self.stop()
-
-@bot.tree.command(name="covua", description="Mời một thành viên khác vào bàn đấu Cờ Vua Mini giao lưu!")
-async def covua(interaction: discord.Interaction, opponent: discord.Member):
-    if opponent.bot or opponent == interaction.user:
-        await interaction.response.send_message("❌ Bạn không thể đấu với bot hoặc tự đấu với chính mình!", ephemeral=True)
-        return
-        
-    view = ChessView(interaction.user, opponent)
-    await interaction.response.send_message(
-        f"♟️ **BÀN CỜ VUA MINI ĐÃ MỞ!**\nThách đấu giữa {interaction.user.mention} và {opponent.mention}!\n👉 **Lượt đi đầu tiên:** {interaction.user.mention}",
-        view=view
-    )
-
-
-# --- 6. CÁC LỆNH ADMIN & CƠ BẢN KHÁC ---
+# --- 6. CÁC LỆNH SLASH (COMMANDS) ---
 
 @bot.tree.command(name="reset_week_manual", description="[ADMIN] Ép trao Role Top 1, 2, 3 và reset điểm tuần ngay lập tức")
 @app_commands.checks.has_permissions(administrator=True)
@@ -609,6 +379,7 @@ async def set_top_title(interaction: discord.Interaction, top: app_commands.Choi
     rank_str = str(top.value)
     titles[rank_str] = {"icon": icon, "name": title_name}
     save_titles(titles)
+    
     await interaction.response.send_message(f"✅ Đã đổi danh hiệu **Top {top.value}** thành: {icon} **[{title_name}]**!")
 
 @bot.tree.command(name="set_game_channel", description="[ADMIN] Đặt kênh tự động phát Mini-game và gửi BXH mỗi ngày")
@@ -617,6 +388,64 @@ async def set_game_channel(interaction: discord.Interaction, channel: discord.Te
     global GAME_CHANNEL_ID
     GAME_CHANNEL_ID = channel.id
     await interaction.response.send_message(f"✅ Đã chọn kênh **{channel.mention}** làm nơi phát Mini-game và tự động thông báo BXH!")
+
+# LỆNH ĐỐ VUI (CÁCH THỨC CŨ)
+@bot.tree.command(name="dovui", description="Trả lời đố vui nhận điểm thưởng!")
+async def dovui(interaction: discord.Interaction):
+    item = random.choice(CUSTOM_TRIVIA)
+    
+    await interaction.response.send_message(f"❓ **Câu hỏi:** {item['q']}\n*(Bạn có 15 giây để gõ đáp án vào chat!)*")
+    
+    def check(m):
+        return m.author == interaction.user and m.channel == interaction.channel
+
+    try:
+        msg = await bot.wait_for('message', timeout=15.0, check=check)
+        user_ans = msg.content.strip().lower()
+        
+        # Kiểm tra đáp án có khớp với bất kỳ đáp án hợp lệ nào không
+        valid_answers = [a.lower() for a in item['a']]
+        
+        if user_ans in valid_answers:
+            pts = random.randint(20, 50)
+            new_score = add_points(str(interaction.user.id), pts)
+            await interaction.followup.send(f"🎉 **Chính xác!** Bạn nhận **+{pts} điểm**. Tổng điểm tuần: `{new_score}`.")
+        else:
+            first_ans = item['a'][0]
+            await interaction.followup.send(f"❌ Sai rồi! Đáp án đúng là: **{first_ans}**.")
+    except Exception:
+        await interaction.followup.send("⏰ Đã hết thời gian trả lời!")
+
+# LỆNH CƯỚP ĐIỂM (CÁCH THỨC CŨ)
+@bot.tree.command(name="cuop", description="Thử vận may đi cướp điểm!")
+@app_commands.checks.cooldown(1, 60)
+async def cuop(interaction: discord.Interaction):
+    success = random.choice([True, False])
+    user_id = str(interaction.user.id)
+    
+    if success:
+        pts = random.randint(30, 80)
+        new_score = add_points(user_id, pts)
+        await interaction.response.send_message(f"💰 **Thành công!** Bạn cướp được **+{pts} điểm**. Tổng điểm tuần: `{new_score}`.")
+    else:
+        pts = random.randint(10, 30)
+        data = load_data()
+        current = data.get(user_id, {}).get("weekly", 0)
+        loss = min(current, pts)
+        
+        if user_id in data:
+            data[user_id]["weekly"] -= loss
+            save_data(data)
+            
+        await interaction.response.send_message(f"🚨 **Bị bắt!** Bạn bị trừ **-{loss} điểm**.")
+
+# Xử lý lỗi khi dính cooldown của lệnh /cuop
+@cuop.error
+async def cuop_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CommandOnCooldown):
+        await interaction.response.send_message(f"⏳ Cảnh sát đang đi tuần! Vui lòng đợi `{int(error.retry_after)}s` nữa để đi cướp lại.", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Đã xảy ra lỗi khi thực hiện lệnh.", ephemeral=True)
 
 @bot.tree.command(name="bangxephang", description="Xem Bảng Xếp Hạng điểm tuần!")
 async def bangxephang(interaction: discord.Interaction):
@@ -633,8 +462,8 @@ async def bangxephang(interaction: discord.Interaction):
         
         icon = "🔹"
         if str(index) in titles:
-            t_icon = titles[str(index)]['icon']
-            t_name = titles[str(index)]['name']
+            t_icon = titles[str(index)]["icon"]
+            t_name = titles[str(index)]["name"]
             icon = f"{t_icon} **[Top {index} - {t_name}]**"
         
         description += f"{index}. {icon} {name} — `{score.get('weekly', 0)} điểm`\n"
@@ -660,7 +489,7 @@ async def danhhieu_revoke(interaction: discord.Interaction, user: discord.Member
     await user.remove_roles(role)
     await interaction.response.send_message(f"🗑️ Đã thu hồi danh hiệu **{role.name}** từ {user.mention}!")
 
-# --- 7. CHẠY BOT ---
+# --- 7. CHẠY BOT VỚI TOKEN TỪ BIẾN MÔI TRƯỜNG ---
 keep_alive()
 TOKEN = os.getenv('TOKEN')
 bot.run(TOKEN)
