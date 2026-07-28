@@ -1,9 +1,10 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import random
 import json
 import os
+import time
 from flask import Flask
 from threading import Thread
 
@@ -21,18 +22,40 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# --- 2. QUẢN LÝ DỮ LIỆU ĐIỂM (LƯU FILE JSON) ---
+# --- 2. QUẢN LÝ DỮ LIỆU ĐIỂM & DANH HIỆU (LƯU FILE JSON) ---
 DATA_FILE = "user_points.json"
+TITLES_FILE = "titles_config.json"
 
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except:
+                return {}
     return {}
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
+
+def load_titles():
+    default_titles = {
+        "1": {"icon": "👹", "name": "Quỷ Thần"},
+        "2": {"icon": "⚔️", "name": "Thần Thương"},
+        "3": {"icon": "🐎", "name": "Kị Vương"}
+    }
+    if os.path.exists(TITLES_FILE):
+        with open(TITLES_FILE, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except:
+                return default_titles
+    return default_titles
+
+def save_titles(titles):
+    with open(TITLES_FILE, "w", encoding="utf-8") as f:
+        json.dump(titles, f, ensure_ascii=False, indent=4)
 
 def add_points(user_id: str, amount: int):
     data = load_data()
@@ -44,23 +67,139 @@ def add_points(user_id: str, amount: int):
     save_data(data)
     return data[user_id]["weekly"]
 
+# Biến lưu thời gian cooldown nhắn tin của từng người dùng
+chat_cooldowns = {}
+
 # --- 3. CẤU HÌNH BOT DISCORD ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# ID Kênh phát trò chơi tự động mỗi 30 phút
+GAME_CHANNEL_ID = None
+
+# --- 4. TÁC VỤ TỰ ĐỘNG (BACKGROUND TASKS) ---
+
+# Tự động cộng điểm Voice (mỗi 5 phút +5 điểm)
+@tasks.loop(minutes=5)
+async def check_voice_points():
+    for guild in bot.guilds:
+        for vc in guild.voice_channels:
+            members = [m for m in vc.members if not m.bot and not m.voice.deaf and not m.voice.self_deaf]
+            for member in members:
+                add_points(str(member.id), 5)
+
+# Tự động phát Mini-game ngẫu nhiên mỗi 30 phút
+@tasks.loop(minutes=30)
+async def auto_minigame_task():
+    global GAME_CHANNEL_ID
+    if not GAME_CHANNEL_ID:
+        return
+    
+    channel = bot.get_channel(GAME_CHANNEL_ID)
+    if not channel:
+        return
+    
+    game_type = random.choice(["math", "word", "fast_type"])
+    
+    if game_type == "math":
+        a, b = random.randint(10, 99), random.randint(10, 99)
+        ans = str(a + b)
+        embed = discord.Embed(
+            title="🎮 MINI-GAME TỰ ĐỘNG (30 PHÚT)",
+            description=f"Tính nhanh: **{a} + {b} = ?**\nAi gõ đúng đáp án đầu tiên nhận ngay **+30 điểm**! *(Thời gian: 30s)*",
+            color=discord.Color.green()
+        )
+    elif game_type == "word":
+        words = ["genshin", "valorant", "minecraft", "roblox", "python", "discord", "system"]
+        target = random.choice(words)
+        scrambled = "".join(random.sample(target, len(target)))
+        ans = target
+        embed = discord.Embed(
+            title="🎮 MINI-GAME TỰ ĐỘNG (30 PHÚT)",
+            description=f"Giải mã từ bị xáo trộn: **`{scrambled}`**\nAi gõ đúng từ gốc tiếng Anh nhận ngay **+30 điểm**! *(Thời gian: 30s)*",
+            color=discord.Color.purple()
+        )
+    else:
+        words = ["HE THONG DISCORD", "QUY THAN", "THAN THUONG", "KI VUONG", "DISCORD BOT"]
+        target = random.choice(words)
+        ans = target
+        embed = discord.Embed(
+            title="🎮 MINI-GAME TỰ ĐỘNG (30 PHÚT)",
+            description=f"Thử thách tay nhanh: Hãy gõ chính xác cụm từ: **`{target}`**\nNgười nhanh nhất nhận ngay **+30 điểm**! *(Thời gian: 30s)*",
+            color=discord.Color.gold()
+        )
+
+    await channel.send(embed=embed)
+
+    def check(m):
+        return m.channel == channel and not m.bot and m.content.strip().lower() == ans.lower()
+
+    try:
+        msg = await bot.wait_for('message', timeout=30.0, check=check)
+        new_score = add_points(str(msg.author.id), 30)
+        await channel.send(f"🎉 Chúc mừng {msg.author.mention} đã trả lời đúng nhanh nhất! Bạn nhận **+30 điểm** (Tổng điểm tuần: `{new_score}`).")
+    except Exception:
+        await channel.send("⏰ Đã hết 30 giây mà không có ai trả lời đúng!")
 
 @bot.event
 async def on_ready():
     print(f"Bot đã online: {bot.user}")
+    
+    if not check_voice_points.is_running():
+        check_voice_points.start()
+    if not auto_minigame_task.is_running():
+        auto_minigame_task.start()
+        
     try:
         synced = await bot.tree.sync()
         print(f"Đã đồng bộ {len(synced)} lệnh Slash (/)...")
     except Exception as e:
         print(f"Lỗi sync: {e}")
 
-# --- 4. GAME KHUNG CHAT (ĐỐ VUI & CƯỚP) ---
+# --- 5. TỰ ĐỘNG CỘNG ĐIỂM CHAT ---
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return
+    
+    user_id = str(message.author.id)
+    current_time = time.time()
+    
+    if user_id not in chat_cooldowns or (current_time - chat_cooldowns[user_id]) >= 60:
+        pts = random.randint(1, 3)
+        add_points(user_id, pts)
+        chat_cooldowns[user_id] = current_time
+        
+    await bot.process_commands(message)
+
+# --- 6. CÁC LỆNH SLASH (COMMANDS) ---
+
+@bot.tree.command(name="set_top_title", description="[ADMIN] Đổi danh hiệu và biểu tượng cho Top 1, 2 hoặc 3")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.choices(top=[
+    app_commands.Choice(name="Top 1", value=1),
+    app_commands.Choice(name="Top 2", value=2),
+    app_commands.Choice(name="Top 3", value=3)
+])
+async def set_top_title(interaction: discord.Interaction, top: app_commands.Choice[int], icon: str, title_name: str):
+    titles = load_titles()
+    rank_str = str(top.value)
+    titles[rank_str] = {"icon": icon, "name": title_name}
+    save_titles(titles)
+    
+    await interaction.response.send_message(f"✅ Đã đổi danh hiệu **Top {top.value}** thành: {icon} **[{title_name}]**!")
+
+@bot.tree.command(name="set_game_channel", description="[ADMIN] Đặt kênh tự động xuất hiện Mini-game mỗi 30 phút")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_game_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    global GAME_CHANNEL_ID
+    GAME_CHANNEL_ID = channel.id
+    await interaction.response.send_message(f"✅ Đã chọn kênh **{channel.mention}** làm nơi tự động phát Mini-game mỗi 30 phút!")
+
 @bot.tree.command(name="dovui", description="Trả lời đố vui nhận điểm thưởng!")
 async def dovui(interaction: discord.Interaction):
     questions = [
@@ -83,7 +222,7 @@ async def dovui(interaction: discord.Interaction):
             await interaction.followup.send(f"🎉 **Chính xác!** Bạn nhận **+{pts} điểm**. Tổng điểm tuần: `{new_score}`.")
         else:
             await interaction.followup.send(f"❌ Sai rồi! Đáp án đúng là: **{item['a']}**.")
-    except TimeoutError:
+    except Exception:
         await interaction.followup.send("⏰ Đã hết thời gian trả lời!")
 
 @bot.tree.command(name="cuop", description="Thử vận may đi cướp điểm!")
@@ -108,10 +247,10 @@ async def cuop(interaction: discord.Interaction):
             
         await interaction.response.send_message(f"🚨 **Bị bắt!** Bạn bị trừ **-{loss} điểm**.")
 
-# --- 5. BẢNG XẾP HẠNG & LỆNH ADMIN ---
 @bot.tree.command(name="bangxephang", description="Xem Bảng Xếp Hạng điểm tuần!")
 async def bangxephang(interaction: discord.Interaction):
     data = load_data()
+    titles = load_titles()
     sorted_users = sorted(data.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:10]
     
     embed = discord.Embed(title="🏆 BẢNG XẾP HẠNG ĐIỂM TUẦN 🏆", color=discord.Color.gold())
@@ -122,9 +261,10 @@ async def bangxephang(interaction: discord.Interaction):
         name = user.name if user else f"User ID: {u_id}"
         
         icon = "🔹"
-        if index == 1: icon = "👹 **[Top 1 - Quỷ Thần]**"
-        elif index == 2: icon = "⚔️ **[Top 2 - Thần Thương]**"
-        elif index == 3: icon = "🐎 **[Top 3 - Kị Vương]**"
+        if str(index) in titles:
+            t_icon = titles[str(index)]["icon"]
+            t_name = titles[str(index)]["name"]
+            icon = f"{t_icon} **[Top {index} - {t_name}]**"
         
         description += f"{index}. {icon} {name} — `{score.get('weekly', 0)} điểm`\n"
         
@@ -143,7 +283,13 @@ async def danhhieu_grant(interaction: discord.Interaction, user: discord.Member,
     await user.add_roles(role)
     await interaction.response.send_message(f"🎉 Đã trao danh hiệu **{role.name}** cho {user.mention}!")
 
-# --- 6. CHẠY BOT VỚI TOKEN TỪ BIẾN MÔI TRƯỜNG ---
+@bot.tree.command(name="danhhieu_revoke", description="[ADMIN] Thu hồi danh hiệu của thành viên")
+@app_commands.checks.has_permissions(administrator=True)
+async def danhhieu_revoke(interaction: discord.Interaction, user: discord.Member, role: discord.Role):
+    await user.remove_roles(role)
+    await interaction.response.send_message(f"🗑️ Đã thu hồi danh hiệu **{role.name}** từ {user.mention}!")
+
+# --- 7. CHẠY BOT VỚI TOKEN TỪ BIẾN MÔI TRƯỜNG ---
 keep_alive()
 TOKEN = os.getenv('TOKEN')
 bot.run(TOKEN)
