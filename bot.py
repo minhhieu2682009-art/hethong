@@ -2,8 +2,6 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 import random
-import json
-import os
 import time
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -17,7 +15,9 @@ ROLE_TOP1_ID = 123456789012345678
 ROLE_TOP2_ID = 123456789012345678
 ROLE_TOP3_ID = 123456789012345678
 
+# ==============================================================================
 # --- 1. WEB SERVER GIỮ BOT ONLINE 24/7 ---
+# ==============================================================================
 app = Flask('')
 
 @app.route('/')
@@ -32,68 +32,26 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# --- 2. QUẢN LÝ CƠ SỞ DỮ LIỆU (JSON) ---
-DATA_FILE = "user_points.json"
-TITLES_FILE = "titles_config.json"
-PETS_FILE = "user_pets.json"
-CONFIG_FILE = "config.json"
-SHOP_FILE = "fishing_shop.json"
-TRIVIA_FILE = "trivia_questions.json"
-PET_DB_FILE = "pet_database.json"
-PET_ITEMS_FILE = "pet_items.json"
-BOSS_FILE = "boss_tower.json"
-FISH_FILE = "fish_table.json"
+# ==============================================================================
+# --- 2. BỘ TRUY XUẤT DỮ LIỆU TRONG RAM (KHÔNG NỔI LỖI FILE JSON) ---
+# ==============================================================================
+db_users = {}       # {user_id: {"weekly": 0, "total": 0, "titles": []}}
+db_pets = {}        # {user_id: {"type": ..., "level": 1, "exp": 0, ...}}
+db_config = {"game_channel_id": None}
 
-def safe_load_json(file_path, default_data):
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"[ERROR] Lỗi đọc file {file_path}: {e}")
-            return default_data
-    return default_data
+db_titles = {
+    "1": {"icon": "👑", "name": "Dạ Minh Tiên Tôn"},
+    "2": {"icon": "😈", "name": "U Minh Quỷ Đế"},
+    "3": {"icon": "🐢", "name": "Thiên Cơ Đạo Trưởng"}
+}
 
-def safe_save_json(file_path, data):
-    temp_file = f"{file_path}.tmp"
-    try:
-        with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        os.replace(temp_file, file_path)
-    except Exception as e:
-        print(f"[ERROR] Lỗi ghi file {file_path}: {e}")
+db_trivia = [
+    {"q": "Trong một cuộc thi chạy, nếu bạn vượt qua người đang đứng thứ hai, bạn sẽ đứng thứ mấy?", "a": ["thứ hai", "thứ 2", "2", "thu hai"]},
+    {"q": "Bố của Mary có 5 cô con gái: Nana, Nene, Nini, Nono. Hỏi cô con gái thứ 5 tên là gì?", "a": ["mary", "tên là mary", "cô con gái thứ 5 tên là mary"]},
+    {"q": "Có một chiếc xe tải đi vào đường cấm, dù đi qua trước mặt rất nhiều cảnh sát giao thông nhưng không ai phạt. Hỏi tại sao?", "a": ["đi bộ", "bác tài đi bộ", "tài xế đi bộ"]}
+]
 
-def load_data(): return safe_load_json(DATA_FILE, {})
-def save_data(data): safe_save_json(DATA_FILE, data)
-
-def load_pets(): return safe_load_json(PETS_FILE, {})
-def save_pets(data): safe_save_json(PETS_FILE, data)
-
-def load_config(): return safe_load_json(CONFIG_FILE, {"game_channel_id": None})
-def save_config(cfg): safe_save_json(CONFIG_FILE, cfg)
-
-def load_titles():
-    default_titles = {
-        "1": {"icon": "👑", "name": "Dạ Minh Tiên Tôn"},
-        "2": {"icon": "😈", "name": "U Minh Quỷ Đế"},
-        "3": {"icon": "🐢", "name": "Thiên Cơ Đạo Trưởng"}
-    }
-    return safe_load_json(TITLES_FILE, default_titles)
-
-def save_titles(titles): safe_save_json(TITLES_FILE, titles)
-
-def load_trivia():
-    default_trivia = [
-        {"q": "Trong một cuộc thi chạy, nếu bạn vượt qua người đang đứng thứ hai, bạn sẽ đứng thứ mấy?", "a": ["thứ hai", "thứ 2", "2", "thu hai"]},
-        {"q": "Bố của Mary có 5 cô con gái: Nana, Nene, Nini, Nono. Hỏi cô con gái thứ 5 tên là gì?", "a": ["mary", "tên là mary", "cô con gái thứ 5 tên là mary"]},
-        {"q": "Có một chiếc xe tải đi vào đường cấm, dù đi qua trước mặt rất nhiều cảnh sát giao thông nhưng không ai phạt. Hỏi tại sao?", "a": ["đi bộ", "bác tài đi bộ", "tài xế đi bộ"]}
-    ]
-    return safe_load_json(TRIVIA_FILE, default_trivia)
-
-def save_trivia(data): safe_save_json(TRIVIA_FILE, data)
-
-# --- KHỞI TẠO DỮ LIỆU ĐỘNG CHO SHOP, PET, BOSS, CÁ ---
-DEFAULT_FISHING_ITEMS = {
+db_fishing_shop = {
     "moi_canh_gio": {"name": "🪽 Mồi cánh gió", "type": "moi", "rarity": "Thường ⚪", "price": 100, "succ_bonus": 0.01},
     "moi_sao": {"name": "✨ Mồi sao", "type": "moi", "rarity": "Hiếm 🟢", "price": 200, "succ_bonus": 0.10},
     "moi_sumo": {"name": "🥞 Mồi sumo", "type": "moi", "rarity": "Sử Thi 🟣", "price": 10000, "succ_bonus": 0.12},
@@ -103,7 +61,7 @@ DEFAULT_FISHING_ITEMS = {
     "can_lua": {"name": "🔥 Cần lửa", "type": "can", "rarity": "Hiếm 🟢", "price": 1000, "succ_bonus": 0.03}
 }
 
-DEFAULT_PET_DATABASE = {
+db_pet_database = {
     "sutu": {
         "name": "Sư tử con", "rarity": "Thường ⚪",
         "forms": {"1": "🦁 Sư tử con", "2": "🐅 Vương sư", "3": "⚡🐅 Thần hổ sét"},
@@ -136,29 +94,7 @@ DEFAULT_PET_DATABASE = {
     }
 }
 
-DEFAULT_PET_ITEMS = {
-    "cam_duong": {"name": "🍎 Cam dương", "price": 300, "type": "power", "buff_power": 20, "duration": 600, "perm": False},
-    "nam_ky_lung": {"name": "🍄 Nấm kỳ lung", "price": 1000, "type": "power", "buff_power": 100, "duration": 600, "perm": False},
-    "tinh_cau": {"name": "🪐 Tinh cầu", "price": 10000, "type": "power", "buff_power": 10, "duration": 0, "perm": True},
-    "kiquy": {"name": "🧡 Kí quỷ", "price": 10, "type": "exp", "add_exp": 10},
-    "ngao_thi": {"name": "🪲 Ngao thị", "price": 1000, "type": "exp", "add_exp": 200},
-    "thit_long_thu": {"name": "🥩 Thịt long thú", "price": 10000, "type": "exp", "add_exp": 10000}
-}
-
-DEFAULT_BOSS_TOWER = {
-    "1": {"name": "👾 Quái nhỏ", "power": 20, "reward": 100},
-    "2": {"name": "👨🏻‍🐰‍👨🏼 Ma zumbi", "power": 40, "reward": 120},
-    "3": {"name": "👺 Chúa quỷ orozon", "power": 100, "reward": 200},
-    "4": {"name": "🤖 Romaku", "power": 150, "reward": 300},
-    "5": {"name": "🫀 Ma ma thần khu", "power": 300, "reward": 320},
-    "6": {"name": "🐲 Leviathan", "power": 1000, "reward": 1200},
-    "7": {"name": "🐙 Kraken vua biển cả", "power": 2000, "reward": 3000},
-    "8": {"name": "🦣 Behemonth", "power": 3000, "reward": 4000},
-    "9": {"name": "😈 Quỷ thần Satan", "power": 10000, "reward": 6000},
-    "10": {"name": "💀 Adim", "power": 900000000, "reward": 1}
-}
-
-DEFAULT_FISH_TABLE = [
+db_fish_table = [
     {"id": "ro_dong", "name": "🐟 Cá Rô Đồng", "type": "thuong", "pts": 10, "weight": 50},
     {"id": "chep_vang", "name": "🐠 Cá Chép Vàng", "type": "thuong", "pts": 10, "weight": 50},
     {"id": "giay_rach", "name": "👞 Giày Cũ Bị Rách", "type": "xui", "pts": -100, "weight": 40},
@@ -166,46 +102,28 @@ DEFAULT_FISH_TABLE = [
     {"id": "voi_sat_than", "name": "🫍 Cá voi sát thần", "type": "than_thoai", "pts": 500, "title": "🛡️ Sát Long", "weight": 1.0}
 ]
 
-def load_fishing_shop(): return safe_load_json(SHOP_FILE, DEFAULT_FISHING_ITEMS)
-def save_fishing_shop(d): safe_save_json(SHOP_FILE, d)
-
-def load_pet_db(): return safe_load_json(PET_DB_FILE, DEFAULT_PET_DATABASE)
-def save_pet_db(d): safe_save_json(PET_DB_FILE, d)
-
-def load_pet_items(): return safe_load_json(PET_ITEMS_FILE, DEFAULT_PET_ITEMS)
-def save_pet_items(d): safe_save_json(PET_ITEMS_FILE, d)
-
-def load_boss_tower(): return safe_load_json(BOSS_FILE, DEFAULT_BOSS_TOWER)
-def save_boss_tower(d): safe_save_json(BOSS_FILE, d)
-
-def load_fish_table(): return safe_load_json(FISH_FILE, DEFAULT_FISH_TABLE)
-def save_fish_table(d): safe_save_json(FISH_FILE, d)
-
 def add_points(user_id: str, amount: int):
-    data = load_data()
-    if user_id not in data:
-        data[user_id] = {"weekly": 0, "total": 0, "titles": []}
+    if user_id not in db_users:
+        db_users[user_id] = {"weekly": 0, "total": 0, "titles": []}
     
-    data[user_id]["weekly"] = max(0, data[user_id].get("weekly", 0) + amount)
+    db_users[user_id]["weekly"] = max(0, db_users[user_id].get("weekly", 0) + amount)
     if amount > 0:
-        data[user_id]["total"] = data[user_id].get("total", 0) + amount
-    
-    save_data(data)
-    return data[user_id]["weekly"]
+        db_users[user_id]["total"] = db_users[user_id].get("total", 0) + amount
+    return db_users[user_id]["weekly"]
 
 def add_custom_title(user_id: str, title_str: str):
-    data = load_data()
-    if user_id not in data:
-        data[user_id] = {"weekly": 0, "total": 0, "titles": []}
-    if "titles" not in data[user_id]:
-        data[user_id]["titles"] = []
-    if title_str not in data[user_id]["titles"]:
-        data[user_id]["titles"].append(title_str)
-        save_data(data)
+    if user_id not in db_users:
+        db_users[user_id] = {"weekly": 0, "total": 0, "titles": []}
+    if "titles" not in db_users[user_id]:
+        db_users[user_id]["titles"] = []
+    if title_str not in db_users[user_id]["titles"]:
+        db_users[user_id]["titles"].append(title_str)
 
 chat_cooldowns = {}
 
+# ==============================================================================
 # --- 3. CẤU HÌNH BOT ---
+# ==============================================================================
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -214,11 +132,10 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 async def process_weekly_rewards():
-    data = load_data()
-    if not data:
+    if not db_users:
         return "❌ Không có dữ liệu điểm tuần để chốt."
 
-    sorted_users = sorted(data.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:3]
+    sorted_users = sorted(db_users.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:3]
     summary_lines = []
     
     for guild in bot.guilds:
@@ -248,29 +165,27 @@ async def process_weekly_rewards():
                         print(f"[WARN] Không thể trao role: {e}")
                 summary_lines.append(f"🥇 **Top {index+1}:** {member.mention} — `{score.get('weekly', 0)} điểm`")
 
-    for u_id in data:
-        data[u_id]["weekly"] = 0
-    save_data(data)
+    for u_id in db_users:
+        db_users[u_id]["weekly"] = 0
     
     return "\n".join(summary_lines) if summary_lines else "Không tìm thấy thành viên Top trong Server."
 
+# ==============================================================================
 # --- 4. TASKS TỰ ĐỘNG CHẠY NGẦM ---
+# ==============================================================================
 @tasks.loop(minutes=1)
 async def auto_daily_leaderboard():
     vietnam_tz = timezone(timedelta(hours=7))
     now = datetime.now(vietnam_tz)
     
     if now.hour == 8 and now.minute == 0:
-        cfg = load_config()
-        channel_id = cfg.get("game_channel_id")
+        channel_id = db_config.get("game_channel_id")
         if not channel_id: return
             
         channel = bot.get_channel(channel_id)
         if not channel: return
             
-        data = load_data()
-        titles = load_titles()
-        sorted_users = sorted(data.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:10]
+        sorted_users = sorted(db_users.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:10]
         
         embed = discord.Embed(
             title="☀️ BẢNG XẾP HẠNG ĐIỂM TUẦN HÀNG NGÀY ☀️",
@@ -285,9 +200,9 @@ async def auto_daily_leaderboard():
             name = user.mention if user else f"User <@{u_id}>"
             
             icon = "🔹"
-            if str(index) in titles:
-                t_icon = titles[str(index)]["icon"]
-                t_name = titles[str(index)]["name"]
+            if str(index) in db_titles:
+                t_icon = db_titles[str(index)]["icon"]
+                t_name = db_titles[str(index)]["name"]
                 icon = f"{t_icon} **[{t_name}]**"
             
             desc += f"`#{index}` {icon} {name} — **{score.get('weekly', 0)}** điểm\n"
@@ -303,8 +218,7 @@ async def auto_reset_weekly_top():
     
     if now.weekday() == 0 and now.hour == 0 and now.minute == 0:
         msg = await process_weekly_rewards()
-        cfg = load_config()
-        channel_id = cfg.get("game_channel_id")
+        channel_id = db_config.get("game_channel_id")
         if channel_id:
             channel = bot.get_channel(channel_id)
             if channel:
@@ -327,17 +241,15 @@ async def check_voice_points():
 @tasks.loop(hours=1)
 async def auto_minigame_task():
     try:
-        cfg = load_config()
-        channel_id = cfg.get("game_channel_id")
+        channel_id = db_config.get("game_channel_id")
         if not channel_id: return
         
         channel = bot.get_channel(channel_id)
         if not channel: return
         
-        trivia_list = load_trivia()
-        if not trivia_list: return
+        if not db_trivia: return
         
-        item = random.choice(trivia_list)
+        item = random.choice(db_trivia)
         valid_ans = item["a"]
         
         embed = discord.Embed(
@@ -374,7 +286,6 @@ async def before_minigame():
 async def on_ready():
     print(f"[SYSTEM] Bot đã đăng nhập thành công: {bot.user}")
     
-    # --- ĐĂNG KÝ VIEW VĨNH VIỄN ---
     bot.add_view(CauSongView())
     print("[SYSTEM] Đã kích hoạt Persistent View (Vĩnh viễn) cho Shop và Cầu Sông!")
 
@@ -408,7 +319,6 @@ async def on_message(message):
 # --- 5. CÂU CÁ & LỆNH /causong CÓ NÚT BẤM CÂU CÁ + THÊM CÁ (ADMIN) ---
 # ==============================================================================
 
-# Dùng để quản lý Cooldown 30 giây mỗi người
 cooldown_fishing = {}
 
 class AddFishModal(discord.ui.Modal, title="🎣 [ADMIN] Thêm Cá / Vật Phẩm Mới"):
@@ -423,7 +333,6 @@ class AddFishModal(discord.ui.Modal, title="🎣 [ADMIN] Thêm Cá / Vật Phẩ
             await interaction.response.send_message("❌ Chỉ Admin mới có quyền thêm cá!", ephemeral=True)
             return
         
-        fish_table = load_fish_table()
         try:
             pts = int(self.f_pts.value)
             weight = float(self.f_weight.value)
@@ -438,8 +347,7 @@ class AddFishModal(discord.ui.Modal, title="🎣 [ADMIN] Thêm Cá / Vật Phẩ
             "pts": pts,
             "weight": weight
         }
-        fish_table.append(new_fish)
-        save_fish_table(fish_table)
+        db_fish_table.append(new_fish)
 
         embed = discord.Embed(
             title="✅ ĐÃ THÊM CÁ MỚI VÀO SÔNG!",
@@ -450,14 +358,13 @@ class AddFishModal(discord.ui.Modal, title="🎣 [ADMIN] Thêm Cá / Vật Phẩ
 
 class CauSongView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None) # timeout=None để dùng vĩnh viễn
+        super().__init__(timeout=None) # timeout=None cho phép vĩnh viễn
 
     @discord.ui.button(label="Thả Cần Câu Cá 🎣", style=discord.ButtonStyle.success, custom_id="causong_fish_btn")
     async def fish_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
         current_time = time.time()
 
-        # Kiểm tra cooldown 30s
         if user_id in cooldown_fishing:
             elapsed = current_time - cooldown_fishing[user_id]
             if elapsed < 30:
@@ -470,19 +377,16 @@ class CauSongView(discord.ui.View):
 
         cooldown_fishing[user_id] = current_time
 
-        user_pets_data = load_pets()
-        user_inventory = user_pets_data.get(user_id, {}).get("inventory", {})
-
-        fishing_items = load_fishing_shop()
+        user_inventory = db_pets.get(user_id, {}).get("inventory", {})
         base_success_rate = 0.45
         
         active_moi = user_inventory.get("active_moi")
         active_can = user_inventory.get("active_can")
         
-        if active_moi and active_moi in fishing_items:
-            base_success_rate += fishing_items[active_moi].get("succ_bonus", 0)
-        if active_can and active_can in fishing_items:
-            base_success_rate += fishing_items[active_can].get("succ_bonus", 0)
+        if active_moi and active_moi in db_fishing_shop:
+            base_success_rate += db_fishing_shop[active_moi].get("succ_bonus", 0)
+        if active_can and active_can in db_fishing_shop:
+            base_success_rate += db_fishing_shop[active_can].get("succ_bonus", 0)
 
         # Trường hợp CÂU THẤT BẠI
         if random.random() > base_success_rate:
@@ -492,9 +396,8 @@ class CauSongView(discord.ui.View):
             )
             return
 
-        fish_table = load_fish_table()
         weights = []
-        for fish in fish_table:
+        for fish in db_fish_table:
             w = fish["weight"]
             if fish["type"] == "hiem" and active_moi == "moi_sao":
                 w *= 1.5
@@ -504,7 +407,7 @@ class CauSongView(discord.ui.View):
                 w *= 2.0
             weights.append(w)
 
-        caught = random.choices(fish_table, weights=weights)[0]
+        caught = random.choices(db_fish_table, weights=weights)[0]
         pts = caught["pts"]
         new_score = add_points(user_id, pts)
 
@@ -549,10 +452,9 @@ def calculate_pet_power(pet_data):
     if not pet_data or "type" not in pet_data:
         return 0
     p_type = pet_data["type"]
-    pet_db = load_pet_db()
-    if p_type not in pet_db:
+    if p_type not in db_pet_database:
         return 0
-    cfg = pet_db[p_type]
+    cfg = db_pet_database[p_type]
     lvl = pet_data["level"]
     
     base_power = 0
@@ -573,18 +475,16 @@ def calculate_pet_power(pet_data):
 def get_pet_name(pet_data):
     if not pet_data or "type" not in pet_data:
         return "Chưa sở hữu Pet"
-    pet_db = load_pet_db()
-    if pet_data["type"] not in pet_db:
+    if pet_data["type"] not in db_pet_database:
         return "Pet Không Xác Định"
-    p_cfg = pet_db[pet_data["type"]]
+    p_cfg = db_pet_database[pet_data["type"]]
     lvl = str(pet_data["level"])
     forms = p_cfg.get("forms", {})
     return forms.get(lvl, forms.get("3", p_cfg.get("name", "Thần Thú")))
 
 def add_exp_to_pet(pet_data, exp_amount):
     pet_data["exp"] += exp_amount
-    pet_db = load_pet_db()
-    p_cfg = pet_db.get(pet_data["type"], {})
+    p_cfg = db_pet_database.get(pet_data["type"], {})
     
     leveled_up = False
     while True:
@@ -605,8 +505,7 @@ def make_progress_bar(current, total, length=10):
     return "🟩" * filled + "⬛" * (length - filled)
 
 def create_pet_embed(user_name, pet_data, user_points):
-    pet_db = load_pet_db()
-    p_cfg = pet_db.get(pet_data["type"], {})
+    p_cfg = db_pet_database.get(pet_data["type"], {})
     lvl = pet_data["level"]
     form_name = get_pet_name(pet_data)
     exp_caps = p_cfg.get("exp_caps", {})
@@ -655,7 +554,6 @@ class AddPetModal(discord.ui.Modal, title="🐉 [ADMIN] Thêm Loại Pet Mới")
             await interaction.response.send_message("❌ Chỉ Admin mới có quyền thêm Pet!", ephemeral=True)
             return
 
-        pet_db = load_pet_db()
         forms_split = [f.strip() for f in self.form23.value.split(",")]
         f2 = forms_split[0] if len(forms_split) > 0 else self.pet_name.value
         f3 = forms_split[1] if len(forms_split) > 1 else f2
@@ -670,8 +568,7 @@ class AddPetModal(discord.ui.Modal, title="🐉 [ADMIN] Thêm Loại Pet Mới")
             "high_pwr_per_lvl": int(self.pwr_lvl.value) * 5
         }
 
-        pet_db[self.pet_id.value.strip()] = new_pet
-        save_pet_db(pet_db)
+        db_pet_database[self.pet_id.value.strip()] = new_pet
 
         embed = discord.Embed(
             title="✅ THÊM PET MỚI THÀNH CÔNG!",
@@ -693,20 +590,17 @@ class PetView(discord.ui.View):
 
     @discord.ui.button(label="Mở Trứng Pet (100đ)", style=discord.ButtonStyle.success, emoji="🥚")
     async def open_egg(self, interaction: discord.Interaction, button: discord.ui.Button):
-        data = load_data()
-        current_pts = data.get(self.user_id, {}).get("weekly", 0)
+        current_pts = db_users.get(self.user_id, {}).get("weekly", 0)
         if current_pts < 100:
             await interaction.response.send_message("❌ Bạn không đủ **100 điểm** để mở trứng Pet!", ephemeral=True)
             return
 
         add_points(self.user_id, -100)
-        pet_db = load_pet_db()
-        pet_keys = list(pet_db.keys())
+        pet_keys = list(db_pet_database.keys())
         pet_choice = random.choice(pet_keys) if pet_keys else "sutu"
 
-        pets = load_pets()
-        p_info = pet_db.get(pet_choice, DEFAULT_PET_DATABASE["sutu"])
-        pets[self.user_id] = {
+        p_info = db_pet_database.get(pet_choice, db_pet_database["sutu"])
+        db_pets[self.user_id] = {
             "type": pet_choice,
             "level": 1,
             "exp": 0,
@@ -714,31 +608,27 @@ class PetView(discord.ui.View):
             "temp_power": 0,
             "buff_until": 0
         }
-        save_pets(pets)
 
-        updated_pts = load_data().get(self.user_id, {}).get("weekly", 0)
-        embed = create_pet_embed(interaction.user.display_name, pets[self.user_id], updated_pts)
+        updated_pts = db_users.get(self.user_id, {}).get("weekly", 0)
+        embed = create_pet_embed(interaction.user.display_name, db_pets[self.user_id], updated_pts)
         await interaction.response.edit_message(content=f"🎉 **Chúc mừng!** Bạn đã ấp thành công trứng và nhận được **{p_info['forms']['1']}**!", embed=embed, view=self)
 
     @discord.ui.button(label="Cho Pet Ăn (+100 EXP) - 500đ", style=discord.ButtonStyle.primary, emoji="🍖")
     async def feed_pet(self, interaction: discord.Interaction, button: discord.ui.Button):
-        pets = load_pets()
-        p = pets.get(self.user_id)
+        p = db_pets.get(self.user_id)
         if not p or "type" not in p:
             await interaction.response.send_message("❌ Bạn chưa sở hữu Pet nào! Hãy mở trứng trước.", ephemeral=True)
             return
 
-        data = load_data()
-        pts = data.get(self.user_id, {}).get("weekly", 0)
+        pts = db_users.get(self.user_id, {}).get("weekly", 0)
         if pts < 500:
             await interaction.response.send_message(f"❌ Bạn không đủ điểm! Cần **500 điểm** để cho Pet ăn (Hiện có: `{pts}` điểm).", ephemeral=True)
             return
 
         add_points(self.user_id, -500)
         leveled_up = add_exp_to_pet(p, 100)
-        save_pets(pets)
         
-        updated_pts = load_data().get(self.user_id, {}).get("weekly", 0)
+        updated_pts = db_users.get(self.user_id, {}).get("weekly", 0)
         embed = create_pet_embed(interaction.user.display_name, p, updated_pts)
 
         msg_content = "🍖 Bạn đã tốn **500 điểm** cho Pet ăn và nhận **+100 EXP**!"
@@ -757,10 +647,8 @@ class PetView(discord.ui.View):
 @bot.tree.command(name="nuoithu", description="Mở bảng điều khiển Thú Cưng Ảo")
 async def nuoithu(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
-    pets = load_pets()
-    p = pets.get(user_id)
-    data = load_data()
-    user_pts = data.get(user_id, {}).get("weekly", 0)
+    p = db_pets.get(user_id)
+    user_pts = db_users.get(user_id, {}).get("weekly", 0)
 
     if not p or "type" not in p:
         embed = discord.Embed(
