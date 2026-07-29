@@ -173,6 +173,7 @@ def add_custom_title(user_id: str, title_str: str):
     save_data(data)
 
 chat_cooldowns = {}
+fishing_cooldowns = {}  # Lưu thời gian cooldown câu cá của từng người chơi
 
 # --- 3. CẤU HÌNH BOT ---
 intents = discord.Intents.default()
@@ -273,6 +274,19 @@ class CauSongView(discord.ui.View):
     @discord.ui.button(label="Quăng Cần Câu", style=discord.ButtonStyle.primary, emoji="🎣", custom_id="btn_quang_can")
     async def quang_can(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
+        current_time = time.time()
+        
+        # --- THÊM COOLDOWN 3 GIÂY CHO LẦN CÂU ---
+        cooldown_duration = 3.0
+        if user_id in fishing_cooldowns:
+            elapsed = current_time - fishing_cooldowns[user_id]
+            if elapsed < cooldown_duration:
+                remaining = round(cooldown_duration - elapsed, 1)
+                await interaction.response.send_message(f"⏳ Bạn đang mỏi tay! Vui lòng đợi **{remaining} giây** nữa mới được quăng cần tiếp.", ephemeral=True)
+                return
+        
+        fishing_cooldowns[user_id] = current_time
+
         user_pets_data = load_pets()
         user_inventory = user_pets_data.get(user_id, {}).get("inventory", {})
         fishing_items = load_fishing_items()
@@ -287,14 +301,15 @@ class CauSongView(discord.ui.View):
             base_success_rate += fishing_items[active_can].get("succ_bonus", 0)
 
         if random.random() > base_success_rate:
-            await interaction.response.send_message("🎣 **Rất tiếc!** Bạn đã quăng cần nhưng cá cắn hụt, câu thất bại rồi!", ephemeral=True)
+            # Thông báo công khai tên người câu hụt
+            await interaction.response.send_message(f"🎣 **{interaction.user.mention}** đã quăng cần nhưng cá cắn hụt, câu thất bại rồi!")
             return
 
         caught = random.choices(fish_table, weights=[f["weight"] for f in fish_table])[0]
         pts = caught["pts"]
         new_score = add_points(user_id, pts)
 
-        msg = f"🎣 Bạn vung cần thành công! Bắt được **{caught['name']}**!\n"
+        msg = f"🎣 **{interaction.user.mention}** vung cần thành công! Bắt được **{caught['name']}**!\n"
         if pts >= 0:
             msg += f"📈 Nhận được **+{pts} điểm** (Điểm tuần: `{new_score}`)."
         else:
@@ -304,7 +319,8 @@ class CauSongView(discord.ui.View):
             add_custom_title(user_id, caught["title"])
             msg += f"\n🎉 Khai quật được danh hiệu: **[{caught['title']}]**!"
 
-        await interaction.response.send_message(msg, ephemeral=True)
+        # Gửi công khai ra kênh để mọi người đều thấy ai câu được gì
+        await interaction.response.send_message(msg)
 
     @discord.ui.button(label="Thêm Cá (Admin)", style=discord.ButtonStyle.danger, emoji="➕", custom_id="btn_them_ca")
     async def them_ca(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -531,15 +547,14 @@ async def pvp_pet(interaction: discord.Interaction, target: discord.Member):
     if not view.value:
         return
 
-    # Tính toán kết quả PvP dựa trên lực chiến
     p1_pwr = calculate_pet_power(p1)
     p2_pwr = calculate_pet_power(p2)
     reward = random.randint(50, 150)
 
     if p1_pwr == p2_pwr:
-        win_p1 = random.choice([True, False]) # 50% - 50%
+        win_p1 = random.choice([True, False])
     elif p1_pwr > p2_pwr:
-        win_p1 = random.random() < 0.60 # 60% thắng cho người cao hơn
+        win_p1 = random.random() < 0.60
     else:
         win_p1 = random.random() < 0.40
 
@@ -587,7 +602,6 @@ class BossTowerView(discord.ui.View):
         pwr = calculate_pet_power(p)
         boss_tower = load_boss_tower()
         
-        # Mặc định lấy boss tầng 1 để test nhanh
         b = boss_tower.get("1", {"name": "👾 Quái nhỏ", "power": 20, "reward": 100})
         if pwr >= b["power"]:
             add_points(user_id, b["reward"])
