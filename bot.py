@@ -98,9 +98,11 @@ def add_points(user_id: str, amount: int):
     data = load_data()
     if user_id not in data:
         data[user_id] = {"weekly": 0, "total": 0, "titles": []}
+    
     data[user_id]["weekly"] = max(0, data[user_id].get("weekly", 0) + amount)
     if amount > 0:
         data[user_id]["total"] = data[user_id].get("total", 0) + amount
+    
     save_data(data)
     return data[user_id]["weekly"]
 
@@ -112,7 +114,7 @@ def add_custom_title(user_id: str, title_str: str):
         data[user_id]["titles"] = []
     if title_str not in data[user_id]["titles"]:
         data[user_id]["titles"].append(title_str)
-    save_data(data)
+        save_data(data)
 
 chat_cooldowns = {}
 
@@ -131,12 +133,14 @@ async def process_weekly_rewards():
 
     sorted_users = sorted(data.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:3]
     summary_lines = []
+    
     for guild in bot.guilds:
         roles = [
             guild.get_role(ROLE_TOP1_ID),
             guild.get_role(ROLE_TOP2_ID),
             guild.get_role(ROLE_TOP3_ID)
         ]
+        
         for role in roles:
             if role:
                 for member in role.members:
@@ -148,6 +152,7 @@ async def process_weekly_rewards():
         for index, (u_id, score) in enumerate(sorted_users):
             member = guild.get_member(int(u_id))
             target_role = roles[index] if index < len(roles) else None
+            
             if member:
                 if target_role:
                     try:
@@ -159,6 +164,7 @@ async def process_weekly_rewards():
     for u_id in data:
         data[u_id]["weekly"] = 0
     save_data(data)
+    
     return "\n".join(summary_lines) if summary_lines else "Không tìm thấy thành viên Top trong Server."
 
 # --- 4. TASK TỰ ĐỘNG CHẠY NGẦM ---
@@ -167,31 +173,39 @@ async def process_weekly_rewards():
 async def auto_daily_leaderboard():
     vietnam_tz = timezone(timedelta(hours=7))
     now = datetime.now(vietnam_tz)
+    
     if now.hour == 8 and now.minute == 0:
         cfg = load_config()
         channel_id = cfg.get("game_channel_id")
         if not channel_id: return
+            
         channel = bot.get_channel(channel_id)
         if not channel: return
+            
         data = load_data()
         titles = load_titles()
         sorted_users = sorted(data.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:10]
+        
         embed = discord.Embed(
             title="☀️ BẢNG XẾP HẠNG ĐIỂM TUẦN HÀNG NGÀY ☀️",
             description="Được tự động cập nhật lúc 08:00 sáng mỗi ngày.",
             color=discord.Color.gold(),
             timestamp=now
         )
+        
         desc = ""
         for index, (u_id, score) in enumerate(sorted_users, 1):
             user = bot.get_user(int(u_id))
             name = user.mention if user else f"User <@{u_id}>"
+            
             icon = "🔹"
             if str(index) in titles:
                 t_icon = titles[str(index)]["icon"]
                 t_name = titles[str(index)]["name"]
                 icon = f"{t_icon} **[{t_name}]**"
+            
             desc += f"`#{index}` {icon} {name} — **{score.get('weekly', 0)}** điểm\n"
+            
         embed.add_field(name="🏆 Top Cống Hiến", value=desc if desc else "Chưa có dữ liệu.", inline=False)
         embed.set_footer(text="Hệ thống tích điểm tự động")
         await channel.send(embed=embed)
@@ -200,6 +214,7 @@ async def auto_daily_leaderboard():
 async def auto_reset_weekly_top():
     vietnam_tz = timezone(timedelta(hours=7))
     now = datetime.now(vietnam_tz)
+    
     if now.weekday() == 0 and now.hour == 0 and now.minute == 0:
         msg = await process_weekly_rewards()
         cfg = load_config()
@@ -228,16 +243,20 @@ async def auto_minigame_task():
     try:
         cfg = load_config()
         channel_id = cfg.get("game_channel_id")
-        if not channel_id:
+        if not channel_id: 
             return
+        
         channel = bot.get_channel(channel_id)
-        if not channel:
+        if not channel: 
             return
+        
         trivia_list = load_trivia()
-        if not trivia_list:
+        if not trivia_list: 
             return
+        
         item = random.choice(trivia_list)
         valid_ans = item["a"]
+        
         embed = discord.Embed(
             title="🎯 MINI-GAME HÀNG GIỜ: ĐỐ VUI MẸO",
             description=f"❓ **Câu hỏi:** {item['q']}\n\n⚡ *Gõ câu trả lời vào chat trong 45s để nhận ngay **+30 điểm**!*",
@@ -248,8 +267,8 @@ async def auto_minigame_task():
 
         def check(m):
             return (
-                m.channel == channel
-                and not m.bot
+                m.channel == channel 
+                and not m.bot 
                 and m.content.strip().lower() in [ans.lower() for ans in valid_ans]
             )
 
@@ -271,10 +290,12 @@ async def before_minigame():
 @bot.event
 async def on_ready():
     print(f"[SYSTEM] Bot đã đăng nhập thành công: {bot.user}")
+    
     if not check_voice_points.is_running(): check_voice_points.start()
     if not auto_minigame_task.is_running(): auto_minigame_task.start()
     if not auto_reset_weekly_top.is_running(): auto_reset_weekly_top.start()
     if not auto_daily_leaderboard.is_running(): auto_daily_leaderboard.start()
+        
     try:
         synced = await bot.tree.sync()
         print(f"[SYSTEM] Đã đồng bộ thành công {len(synced)} lệnh Slash (/)...")
@@ -285,12 +306,15 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot or not message.guild:
         return
+    
     user_id = str(message.author.id)
     current_time = time.time()
+    
     if user_id not in chat_cooldowns or (current_time - chat_cooldowns[user_id]) >= 60:
         pts = random.randint(1, 3)
         add_points(user_id, pts)
         chat_cooldowns[user_id] = current_time
+        
     await bot.process_commands(message)
 
 # ==============================================================================
@@ -302,6 +326,7 @@ FISHING_ITEMS = {
     "moi_sao": {"name": "✨ Mồi sao", "type": "moi", "rarity": "hiem", "price": 200, "succ_bonus": 0.10, "rare_bonus": 0.10},
     "moi_sumo": {"name": "🥞 Mồi sumo", "type": "moi", "rarity": "su_thi", "price": 10000, "succ_bonus": 0.12, "epic_bonus": 0.11},
     "moi_tien_ca": {"name": "🧜 Mồi nàng tiên cá", "type": "moi", "rarity": "than_thoai", "price": 25000, "succ_bonus": 0.16, "mythic_bonus": 0.05},
+    
     "can_banh_mi": {"name": "🥖 Cần bánh mì", "type": "can", "rarity": "thuong", "price": 10, "succ_bonus": 0},
     "can_set": {"name": "⚡ Cần sét", "type": "can", "rarity": "hiem", "price": 100, "succ_bonus": 0.01},
     "can_lua": {"name": "🔥 Cần lửa", "type": "can", "rarity": "hiem", "price": 1000, "succ_bonus": 0.03}
@@ -312,13 +337,16 @@ FISH_TABLE = [
     {"id": "chep_vang", "name": "🐠 Cá Chép Vàng", "type": "thuong", "pts": 10, "weight": 50},
     {"id": "ca_tam", "name": "🦈 Cá Tầm", "type": "thuong", "pts": 10, "weight": 50},
     {"id": "chim_cut", "name": "🐧 Chim Cút", "type": "thuong", "pts": 20, "weight": 50},
+    
     {"id": "giay_rach", "name": "👞 Giày Cũ Bị Rách", "type": "xui", "pts": -100, "weight": 40},
     {"id": "ruong_bau", "name": "👑 Rương Báu Dưới Sông", "type": "hiem", "pts": 100, "weight": 40},
     {"id": "bach_tuoc", "name": "🐙 Bạch tuộc", "type": "hiem", "pts": 60, "weight": 40},
     {"id": "rua_con", "name": "🐢 Rùa con", "type": "hiem", "pts": 70, "weight": 40},
+    
     {"id": "tieu_long_cau", "name": "🦭 Tiểu long cẩu", "type": "su_thi", "pts": 200, "weight": 20},
     {"id": "tom_suki", "name": "🦞 Tôm suki", "type": "su_thi", "pts": 210, "weight": 19},
     {"id": "light_suki", "name": "⭐ Light suki", "type": "su_thi", "pts": 220, "weight": 15},
+    
     {"id": "voi_sat_than", "name": "🫍 Cá voi sát thần", "type": "than_thoai", "pts": 500, "title": "🛡️ Sát Long", "weight": 1.0},
     {"id": "virus_tu_than", "name": "🦠 Virut tử thần", "type": "than_thoai", "pts": 1000, "title": "👑 Virut Vương", "weight": 0.5},
     {"id": "leviathan", "name": "🐉 Leviathan", "type": "than_thoai", "pts": 2000, "title": "🌊 Leviathan", "weight": 0.1}
@@ -332,8 +360,10 @@ async def causong(interaction: discord.Interaction):
     user_inventory = user_pets_data.get(user_id, {}).get("inventory", {})
 
     base_success_rate = 0.45
+    
     active_moi = user_inventory.get("active_moi")
     active_can = user_inventory.get("active_can")
+    
     if active_moi and active_moi in FISHING_ITEMS:
         base_success_rate += FISHING_ITEMS[active_moi].get("succ_bonus", 0)
     if active_can and active_can in FISHING_ITEMS:
@@ -445,15 +475,20 @@ PET_DATABASE = {
     }
 }
 
+# BỔ SUNG CÁC MÓN ĂN TĂNG EXP VÀO DANH SÁCH ITEM PET
 PET_ITEMS = {
+    # Tăng sức mạnh
     "cam_duong": {"name": "🍎 Cam dương", "price": 300, "type": "power", "buff_power": 20, "duration": 600, "perm": False},
     "nam_ky_lung": {"name": "🍄 Nấm kỳ lung", "price": 1000, "type": "power", "buff_power": 100, "duration": 600, "perm": False},
     "tinh_cau": {"name": "🪐 Tinh cầu", "price": 10000, "type": "power", "buff_power": 10, "duration": 0, "perm": True},
+    
+    # Tăng EXP trực tiếp (Đã bổ sung theo yêu cầu)
     "kiquy": {"name": "🧡 Kí quỷ", "price": 10, "type": "exp", "add_exp": 10},
     "ngao_thi": {"name": "🪲 Ngao thị", "price": 1000, "type": "exp", "add_exp": 200},
     "thit_long_thu": {"name": "🥩 Thịt long thú", "price": 10000, "type": "exp", "add_exp": 10000}
 }
 
+# DANH SÁCH THÁP BOSS
 BOSS_TOWER = {
     1: {"name": "👾 Quái nhỏ", "power": 20, "reward": 100},
     2: {"name": "👨🏻‍🐰‍👨🏼 Ma zumbi", "power": 40, "reward": 120},
@@ -473,16 +508,20 @@ def calculate_pet_power(pet_data):
     p_type = pet_data["type"]
     cfg = PET_DATABASE[p_type]
     lvl = pet_data["level"]
+    
     base_power = 0
     for l in range(1, lvl + 1):
         if l < 20:
             base_power += cfg["base_pwr_per_lvl"]
         else:
             base_power += cfg["high_pwr_per_lvl"]
+            
     base_power += pet_data.get("perm_power", 0)
+    
     now = time.time()
     if pet_data.get("buff_until", 0) > now:
         base_power += pet_data.get("temp_power", 0)
+        
     return base_power
 
 def get_pet_name(pet_data):
@@ -495,6 +534,7 @@ def get_pet_name(pet_data):
 def add_exp_to_pet(pet_data, exp_amount):
     pet_data["exp"] += exp_amount
     p_cfg = PET_DATABASE[pet_data["type"]]
+    
     leveled_up = False
     while True:
         lvl = pet_data["level"]
@@ -527,6 +567,7 @@ class PetView(discord.ui.View):
             return
 
         add_points(self.user_id, -100)
+        
         pet_choice = random.choices(
             ["sutu", "gau", "gautruc", "phuonghoang", "rong"],
             weights=[70, 70, 50, 20, 10]
@@ -568,6 +609,7 @@ class PetView(discord.ui.View):
         add_points(self.user_id, -20)
         add_exp_to_pet(p, 100)
         save_pets(pets)
+        
         p_cfg = PET_DATABASE[p["type"]]
         form_name = get_pet_name(p)
         power = calculate_pet_power(p)
@@ -640,9 +682,11 @@ async def buy_pet_item(interaction: discord.Interaction, item_id: app_commands.C
         old_lvl = p["level"]
         add_exp_to_pet(p, exp_gained)
         new_lvl = p["level"]
+        
         msg = f"🎉 Bạn đã cho Pet ăn **{item['name']}**, nhận được **+{exp_gained} EXP**!"
         if new_lvl > old_lvl:
             msg += f"\n🎊 **CHÚC MỪNG!** Pet của bạn đã thăng cấp thành công lên **Level {new_lvl}**!"
+            
     elif item["type"] == "power":
         if item["perm"]:
             p["perm_power"] = p.get("perm_power", 0) + item["buff_power"]
@@ -744,15 +788,15 @@ async def danhboss(interaction: discord.Interaction, tang: app_commands.Choice[i
         new_score = add_points(user_id, boss_info["reward"])
         embed.color = discord.Color.green()
         embed.add_field(
-            name="⚔️ TRẬN ĐẤU KẾT THÚC",
-            value=f"🎉 **CHIẾN THẮNG!** Pet của bạn đã tiêu diệt **{boss_info['name']}**!\n📈 Nhận được **+{boss_info['reward']:,} điểm** (Tổng điểm tuần: `{new_score}`).",
+            name="⚔️ TRẬN ĐẤU KẾT THÚC", 
+            value=f"🎉 **CHIẾN THẮNG!** Pet của bạn đã tiêu diệt **{boss_info['name']}**!\n📈 Nhận được **+{boss_info['reward']:,} điểm** (Tổng điểm tuần: `{new_score}`).", 
             inline=False
         )
     else:
         embed.color = discord.Color.red()
         embed.add_field(
-            name="⚔️ TRẬN ĐẤU KẾT THÚC",
-            value=f"💀 **THẤT BẠI!** Lực chiến của Pet (`{pet_pwr}`) chưa đủ để đánh bại **{boss_info['name']}** (`{boss_info['power']:,}`). Hãy cho Pet ăn để thăng cấp nhé!",
+            name="⚔️ TRẬN ĐẤU KẾT THÚC", 
+            value=f"💀 **THẤT BẠI!** Lực chiến của Pet (`{pet_pwr}`) chưa đủ để đánh bại **{boss_info['name']}** (`{boss_info['power']:,}`). Hãy cho Pet ăn để thăng cấp nhé!", 
             inline=False
         )
 
@@ -767,7 +811,9 @@ async def danhboss(interaction: discord.Interaction, tang: app_commands.Choice[i
 async def cuop(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
     data = load_data()
+    
     possible_targets = [uid for uid, score in data.items() if uid != user_id and score.get("weekly", 0) > 0]
+    
     if not possible_targets:
         await interaction.response.send_message("❌ Chưa có người chơi nào khác có điểm tuần để bạn cướp!", ephemeral=True)
         cuop.reset_cooldown(interaction)
@@ -777,6 +823,7 @@ async def cuop(interaction: discord.Interaction):
     target_user = bot.get_user(int(target_id))
     target_name = target_user.mention if target_user else f"<@{target_id}>"
     target_score = data[target_id]["weekly"]
+    
     is_success = random.random() <= 0.45
 
     if is_success:
@@ -786,8 +833,10 @@ async def cuop(interaction: discord.Interaction):
         else:
             stolen_pts = random.randint(10, min(1000, target_score))
             jackpot_msg = ""
+            
         my_new_score = add_points(user_id, stolen_pts)
         add_points(target_id, -stolen_pts)
+        
         embed = discord.Embed(
             title="🥷 CƯỚP ĐIỂM THÀNH CÔNG!",
             description=f"{jackpot_msg}Bạn đột nhập thành công và cướp **+{stolen_pts} điểm** từ {target_name}!\n📈 Điểm tuần mới của bạn: `{my_new_score}`",
@@ -797,9 +846,11 @@ async def cuop(interaction: discord.Interaction):
         penalty_pts = random.randint(10, 1000)
         my_score = data.get(user_id, {}).get("weekly", 0)
         actual_penalty = min(my_score, penalty_pts)
+        
         if actual_penalty > 0:
             my_new_score = add_points(user_id, -actual_penalty)
             add_points(target_id, actual_penalty)
+            
             embed = discord.Embed(
                 title="🚨 BỊ BẮT QUẢ TANG!",
                 description=f"Bạn định cướp điểm của {target_name} nhưng bị cảnh sát tóm!\n⚖️ Bạn bị phạt **-{actual_penalty} điểm** (chuyển bồi thường cho {target_name}).\n📉 Điểm tuần còn lại: `{my_new_score}`",
@@ -821,87 +872,118 @@ async def cuop(interaction: discord.Interaction):
 ])
 async def taixiu(interaction: discord.Interaction, sodiem_cuoc: int, luachon: app_commands.Choice[str]):
     user_id = str(interaction.user.id)
-    
-    if sodiem_cuoc <= 0:
-        await interaction.response.send_message("❌ Số điểm cược phải lớn hơn 0!", ephemeral=True)
-        return
-
     data = load_data()
     current_pts = data.get(user_id, {}).get("weekly", 0)
-
-    if current_pts < sodiem_cuoc:
-        await interaction.response.send_message(f"❌ Bạn không đủ điểm để cược! Bạn hiện có `{current_pts}` điểm tuần.", ephemeral=True)
-        return
-
-    dice1 = random.randint(1, 6)
-    dice2 = random.randint(1, 6)
-    dice3 = random.randint(1, 6)
-    total = dice1 + dice2 + dice3
-
-    ketqua = "tai" if total >= 11 else "xiu"
     
-    embed = discord.Embed(
-        title="🎲 KẾT QUẢ TÀI XỈU 🎲",
-        description=f"🎲 Xúc sắc ra: **{dice1} - {dice2} - {dice3}** (Tổng: **{total}**)",
-        color=discord.Color.blue()
-    )
+    if sodiem_cuoc <= 0 or current_pts < sodiem_cuoc:
+        await interaction.response.send_message(f"❌ Điểm cược không hợp lệ hoặc bạn không đủ điểm! (Điểm hiện có: `{current_pts}`)", ephemeral=True)
+        return
+        
+    d1, d2, d3 = random.randint(1, 6), random.randint(1, 6), random.randint(1, 6)
+    total = d1 + d2 + d3
+    result = "tai" if total >= 11 else "xiu"
+    
+    embed = discord.Embed(title="🎲 KẾT QUẢ TÀI XỈU")
+    embed.add_field(name="Xúc xắc", value=f"🎲 **{d1}** — 🎲 **{d2}** — 🎲 **{d3}**", inline=False)
+    embed.add_field(name="Tổng điểm", value=f"**{total}** ({'TÀI' if result == 'tai' else 'XỈU'})", inline=False)
 
-    if luachon.value == ketqua:
+    if luachon.value == result:
         new_score = add_points(user_id, sodiem_cuoc)
-        embed.add_field(
-            name="🏆 KẾT QUẢ", 
-            value=f"🎉 **THẮNG CƯỢC!** Ra **{'Tài' if ketqua == 'tai' else 'Xỉu'}**.\nBạn nhận được **+{sodiem_cuoc} điểm** (Điểm tuần mới: `{new_score}`).",
-            inline=False
-        )
         embed.color = discord.Color.green()
+        embed.add_field(name="Kết quả", value=f"🎉 **THẮNG!** Nhận thêm **+{sodiem_cuoc} điểm** (Tổng: `{new_score}`)")
     else:
         new_score = add_points(user_id, -sodiem_cuoc)
-        embed.add_field(
-            name="🏆 KẾT QUẢ", 
-            value=f"😢 **THUA CƯỢC!** Ra **{'Tài' if ketqua == 'tai' else 'Xỉu'}**.\nBạn mất **-{sodiem_cuoc} điểm** (Điểm tuần còn lại: `{new_score}`).",
-            inline=False
-        )
         embed.color = discord.Color.red()
+        embed.add_field(name="Kết quả", value=f"😢 **THUA!** Bị trừ **-{sodiem_cuoc} điểm** (Còn lại: `{new_score}`)")
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="bangxephang", description="Xem bảng xếp hạng điểm tuần của server")
+@bot.tree.command(name="bangxephang", description="Xem Bảng Xếp Hạng điểm tuần hiện tại!")
 async def bangxephang(interaction: discord.Interaction):
     data = load_data()
-    if not data:
-        await interaction.response.send_message("❌ Chưa có dữ liệu bảng xếp hạng!", ephemeral=True)
-        return
-
     titles = load_titles()
     sorted_users = sorted(data.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:10]
-
-    embed = discord.Embed(
-        title="🏆 BẢNG XẾP HẠNG ĐIỂM TUẦN 🏆",
-        description="Top 10 thành viên có lượng điểm tuần cao nhất server.",
-        color=discord.Color.gold()
-    )
-
+    
+    embed = discord.Embed(title="🏆 BẢNG XẾP HẠNG ĐIỂM TUẦN 🏆", color=discord.Color.gold())
+    
     desc = ""
     for index, (u_id, score) in enumerate(sorted_users, 1):
         user = bot.get_user(int(u_id))
-        name = user.mention if user else f"User <@{u_id}>"
+        name = user.mention if user else f"<@{u_id}>"
+        
         icon = "🔹"
         if str(index) in titles:
             t_icon = titles[str(index)]["icon"]
             t_name = titles[str(index)]["name"]
             icon = f"{t_icon} **[{t_name}]**"
-        desc += f"`#{index}` {icon} {name} — **{score.get('weekly', 0)}** điểm\n"
-
-    embed.add_field(name="Top Cống Hiến", value=desc if desc else "Chưa có dữ liệu.", inline=False)
+        
+        user_titles = score.get("titles", [])
+        title_str = f" `[{', '.join(user_titles)}]`" if user_titles else ""
+        
+        desc += f"`#{index}` {icon} {name}{title_str} — **{score.get('weekly', 0)}** điểm\n"
+        
+    embed.description = desc if desc else "Chưa có dữ liệu tích điểm tuần này."
     await interaction.response.send_message(embed=embed)
 
 # ==============================================================================
-# --- 9. CHẠY BOT ---
+# --- 9. CÁC LỆNH ADMIN ---
 # ==============================================================================
-if __name__ == "__main__":
-    keep_alive()  # Khởi chạy Flask Server giữ bot online trên Replit/Render
-    TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # Lấy Token từ biến môi trường
-    if not TOKEN:
-        print("[ERROR] Không tìm thấy DISCORD_BOT_TOKEN trong biến môi trường!")
+
+@bot.tree.command(name="add_question", description="[ADMIN] Thêm câu hỏi đố vui mẹo mới vào hệ thống")
+@app_commands.checks.has_permissions(administrator=True)
+async def add_question(interaction: discord.Interaction, question: str, answer: str):
+    trivia = load_trivia()
+    answers = [a.strip().lower() for a in answer.split(",")]
+    trivia.append({"q": question, "a": answers})
+    save_trivia(trivia)
+    await interaction.response.send_message(f"✅ Đã thêm câu hỏi thành công!\n❓ **Câu hỏi:** {question}\n🎯 **Đáp án:** {answers}")
+
+@bot.tree.command(name="reset_week_manual", description="[ADMIN] Ép chốt Top tuần, trao Role và Reset điểm ngay")
+@app_commands.checks.has_permissions(administrator=True)
+async def reset_week_manual(interaction: discord.Interaction):
+    await interaction.response.defer()
+    msg = await process_weekly_rewards()
+    await interaction.followup.send(f"✅ **ĐÃ CHỐT VÀ RESET ĐIỂM TUẦN THỦ CÔNG:**\n{msg}")
+
+@bot.tree.command(name="set_top_title", description="[ADMIN] Đổi danh hiệu hiển thị cho Top 1, Top 2 hoặc Top 3")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.choices(top=[
+    app_commands.Choice(name="Top 1", value=1),
+    app_commands.Choice(name="Top 2", value=2),
+    app_commands.Choice(name="Top 3", value=3)
+])
+async def set_top_title(interaction: discord.Interaction, top: app_commands.Choice[int], icon: str, title_name: str):
+    titles = load_titles()
+    titles[str(top.value)] = {"icon": icon, "name": title_name}
+    save_titles(titles)
+    await interaction.response.send_message(f"✅ Đã đổi danh hiệu **Top {top.value}** thành: {icon} **[{title_name}]**!")
+
+@bot.tree.command(name="set_game_channel", description="[ADMIN] Đặt kênh nhận thông báo tự động và phát Mini-game (1 tiếng/lần)")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_game_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    cfg = load_config()
+    cfg["game_channel_id"] = channel.id
+    save_config(cfg)
+    await interaction.response.send_message(f"✅ Đã lưu cài đặt kênh **{channel.mention}** làm nơi phát Mini-game đố vui tự động (1 tiếng/lần)!")
+
+@bot.tree.command(name="point_edit", description="[ADMIN] Cộng hoặc trừ điểm tuần trực tiếp của thành viên")
+@app_commands.checks.has_permissions(administrator=True)
+async def point_edit(interaction: discord.Interaction, user: discord.User, amount: int):
+    new_score = add_points(str(user.id), amount)
+    await interaction.response.send_message(f"✅ Đã cập nhật điểm cho {user.mention}. Điểm tuần mới: `{new_score}`.")
+
+# --- HANDLER BẮT LỖI COOLDOWN TOÀN CỤC ---
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CommandOnCooldown):
+        await interaction.response.send_message(f"⏳ Vui lòng chờ `{int(error.retry_after)}s` nữa để tiếp tục sử dụng lệnh này!", ephemeral=True)
     else:
-        bot.run(TOKEN)
+        print(f"[ERROR] App Command Error: {error}")
+
+# --- 10. KÍCH HOẠT BOT ---
+keep_alive()
+TOKEN = os.getenv('TOKEN')
+if TOKEN:
+    bot.run(TOKEN)
+else:
+    print("[ERROR] Không tìm thấy 'TOKEN' trong Environment Variables!")
