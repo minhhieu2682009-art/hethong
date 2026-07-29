@@ -37,10 +37,11 @@ DATA_FILE = "user_points.json"
 TITLES_FILE = "titles_config.json"
 PETS_FILE = "user_pets.json"
 CONFIG_FILE = "config.json"
-SHOP_FILE = "fishing_shop.json"
-TRIVIA_FILE = "trivia_questions.json"
 FISH_CONFIG_FILE = "fish_config.json"
 BOSS_CONFIG_FILE = "boss_config.json"
+TRIVIA_FILE = "trivia_questions.json"
+SHOP_FILE = "fishing_items.json"
+PET_SHOP_FILE = "pet_shop_items.json"
 
 def safe_load_json(file_path, default_data):
     if os.path.exists(file_path):
@@ -83,16 +84,16 @@ def save_titles(titles): safe_save_json(TITLES_FILE, titles)
 def load_fishing_items():
     default_items = {
         "moi_canh_gio": {"name": "🪽 Mồi cánh gió", "type": "moi", "rarity": "thuong", "price": 100, "succ_bonus": 0.01},
-        "moi_sao": {"name": "✨ Mồi sao", "type": "moi", "rarity": "hiem", "price": 200, "succ_bonus": 0.10, "rare_bonus": 0.10},
+        "moi_sao": {"name": "✨ Mồi sao", "type": "moi", "rarity": "hiem", "price": 200, "succ_bonus": 0.10},
         "moi_sumo": {"name": "🥞 Mồi sumo", "type": "moi", "rarity": "su_thi", "price": 10000, "succ_bonus": 0.12},
         "moi_tien_ca": {"name": "🧜 Mồi nàng tiên cá", "type": "moi", "rarity": "than_thoai", "price": 25000, "succ_bonus": 0.16},
         "can_banh_mi": {"name": "🥖 Cần bánh mì", "type": "can", "rarity": "thuong", "price": 10, "succ_bonus": 0},
         "can_set": {"name": "⚡ Cần sét", "type": "can", "rarity": "hiem", "price": 100, "succ_bonus": 0.01},
         "can_lua": {"name": "🔥 Cần lửa", "type": "can", "rarity": "hiem", "price": 1000, "succ_bonus": 0.03}
     }
-    return safe_load_json("fishing_items.json", default_items)
+    return safe_load_json(SHOP_FILE, default_items)
 
-def save_fishing_items(data): safe_save_json("fishing_items.json", data)
+def save_fishing_items(data): safe_save_json(SHOP_FILE, data)
 
 def load_pet_shop_items():
     default_pet_items = {
@@ -103,26 +104,17 @@ def load_pet_shop_items():
         "nam_ky_lung": {"name": "🍄 Nấm kỳ lung (+100 Pwr/10p)", "price": 1000, "type": "power", "buff_power": 100, "duration": 600, "perm": False},
         "tinh_cau": {"name": "🪐 Tinh cầu (+10 Pwr vĩnh viễn)", "price": 10000, "type": "power", "buff_power": 10, "perm": True}
     }
-    return safe_load_json("pet_shop_items.json", default_pet_items)
+    return safe_load_json(PET_SHOP_FILE, default_pet_items)
 
-def save_pet_shop_items(data): safe_save_json("pet_shop_items.json", data)
+def save_pet_shop_items(data): safe_save_json(PET_SHOP_FILE, data)
 
 def load_fish_table():
     default_fish = [
         {"id": "ro_dong", "name": "🐟 Cá Rô Đồng", "type": "thuong", "pts": 10, "weight": 50},
         {"id": "chep_vang", "name": "🐠 Cá Chép Vàng", "type": "thuong", "pts": 10, "weight": 50},
-        {"id": "ca_tam", "name": "🦈 Cá Tầm", "type": "thuong", "pts": 10, "weight": 50},
-        {"id": "chim_cut", "name": "🐧 Chim Cút", "type": "thuong", "pts": 20, "weight": 50},
         {"id": "giay_rach", "name": "👞 Giày Cũ Bị Rách", "type": "xui", "pts": -100, "weight": 40},
         {"id": "ruong_bau", "name": "👑 Rương Báu Dưới Sông", "type": "hiem", "pts": 100, "weight": 40},
-        {"id": "bach_tuoc", "name": "🐙 Bạch tuộc", "type": "hiem", "pts": 60, "weight": 40},
-        {"id": "rua_con", "name": "🐢 Rùa con", "type": "hiem", "pts": 70, "weight": 40},
-        {"id": "tieu_long_cau", "name": "🦭 Tiểu long cẩu", "type": "su_thi", "pts": 200, "weight": 20},
-        {"id": "tom_suki", "name": "🦞 Tôm suki", "type": "su_thi", "pts": 210, "weight": 19},
-        {"id": "light_suki", "name": "⭐ Light suki", "type": "su_thi", "pts": 220, "weight": 15},
-        {"id": "voi_sat_than", "name": "🫍 Cá voi sát thần", "type": "than_thoai", "pts": 500, "title": "🛡️ Sát Long", "weight": 1.0},
-        {"id": "virus_tu_than", "name": "🦠 Virut tử thần", "type": "than_thoai", "pts": 1000, "title": "👑 Virut Vương", "weight": 0.5},
-        {"id": "leviathan", "name": "🐉 Leviathan", "type": "than_thoai", "pts": 2000, "title": "🌊 Leviathan", "weight": 0.1}
+        {"id": "voi_sat_than", "name": "🫍 Cá voi sát thần", "type": "than_thoai", "pts": 500, "title": "🛡️ Sát Long", "weight": 1.0}
     ]
     return safe_load_json(FISH_CONFIG_FILE, default_fish)
 
@@ -170,7 +162,7 @@ def add_custom_title(user_id: str, title_str: str):
         data[user_id]["titles"] = []
     if title_str not in data[user_id]["titles"]:
         data[user_id]["titles"].append(title_str)
-    save_data(data)
+        save_data(data)
 
 chat_cooldowns = {}
 fishing_cooldowns = {}
@@ -217,10 +209,44 @@ async def check_voice_points():
             for member in members:
                 add_points(str(member.id), 5)
 
+@tasks.loop(hours=1)
+async def auto_minigame_task():
+    try:
+        cfg = load_config()
+        channel_id = cfg.get("game_channel_id")
+        if not channel_id: return
+        channel = bot.get_channel(channel_id)
+        if not channel: return
+        
+        trivia_list = load_trivia()
+        if not trivia_list: return
+        item = random.choice(trivia_list)
+        valid_ans = item["a"]
+        
+        embed = discord.Embed(
+            title="🎯 MINI-GAME ĐỐ VUI HÀNG GIỜ",
+            description=f"❓ **Câu hỏi:** {item['q']}\n\n⚡ *Gõ đáp án nhanh trong 45s để nhận ngay **+30 điểm**!*",
+            color=discord.Color.blue()
+        )
+        await channel.send(embed=embed)
+
+        def check(m):
+            return m.channel == channel and not m.bot and m.content.strip().lower() in [a.lower() for a in valid_ans]
+
+        try:
+            msg = await bot.wait_for('message', timeout=45.0, check=check)
+            new_score = add_points(str(msg.author.id), 30)
+            await channel.send(f"🎉 Chúc mừng {msg.author.mention} đã trả lời đúng và nhận **+30 điểm** (Điểm tuần: `{new_score}`)!")
+        except asyncio.TimeoutError:
+            await channel.send(f"⏰ Hết giờ! Đáp án chính xác là: **{valid_ans[0]}**")
+    except Exception as e:
+        print(f"[WARN] Lỗi minigame: {e}")
+
 @bot.event
 async def on_ready():
     print(f"[SYSTEM] Bot đã đăng nhập thành công: {bot.user}")
     if not check_voice_points.is_running(): check_voice_points.start()
+    if not auto_minigame_task.is_running(): auto_minigame_task.start()
     try:
         synced = await bot.tree.sync()
         print(f"[SYSTEM] Đã đồng bộ thành công {len(synced)} lệnh Slash (/)...")
@@ -281,7 +307,7 @@ class CauSongView(discord.ui.View):
             elapsed = current_time - fishing_cooldowns[user_id]
             if elapsed < cooldown_duration:
                 remaining = round(cooldown_duration - elapsed, 1)
-                await interaction.response.send_message(f"⏳ Bạn đang mỏi tay! Vui lòng đợi **{remaining} giây** nữa mới được quăng cần tiếp.", ephemeral=True)
+                await interaction.response.send_message(f"⏳ Bạn đang mỏi tay! Vui lòng đợi **{remaining} giây** nữa.", ephemeral=True)
                 return
         
         fishing_cooldowns[user_id] = current_time
@@ -300,14 +326,14 @@ class CauSongView(discord.ui.View):
             base_success_rate += fishing_items[active_can].get("succ_bonus", 0)
 
         if random.random() > base_success_rate:
-            await interaction.response.send_message(f"🎣 **{interaction.user.mention}** đã quăng cần nhưng cá cắn hụt, câu thất bại rồi!")
+            await interaction.response.send_message(f"🎣 **{interaction.user.mention}** quăng cần nhưng cá cắn hụt, tiếc quá!")
             return
 
         caught = random.choices(fish_table, weights=[f["weight"] for f in fish_table])[0]
         pts = caught["pts"]
         new_score = add_points(user_id, pts)
 
-        msg = f"🎣 **{interaction.user.mention}** vung cần thành công! Bắt được **{caught['name']}**!\n"
+        msg = f"🎣 **{interaction.user.mention}** giật cần thành công! Bắt được **{caught['name']}**!\n"
         if pts >= 0:
             msg += f"📈 Nhận được **+{pts} điểm** (Điểm tuần: `{new_score}`)."
         else:
@@ -333,7 +359,6 @@ async def causong(interaction: discord.Interaction):
         description="Nhấn nút **Quăng Cần Câu** bên dưới để thử vận may câu cá, vật phẩm hoặc rương báu quý hiếm!",
         color=discord.Color.blue()
     )
-    embed.set_footer(text="Hệ thống câu cá hiện đại 2026")
     await interaction.response.send_message(embed=embed, view=CauSongView(interaction.user.id))
 
 # ==============================================================================
@@ -377,14 +402,14 @@ def add_exp_to_pet(pet_data, exp_amount):
 class AddPetModal(discord.ui.Modal, title="➕ Thêm Thú Cưng Mới (Admin)"):
     pet_key = discord.ui.TextInput(label="Mã định danh (vd: phuonghoang)", placeholder="phuonghoang")
     pet_name = discord.ui.TextInput(label="Tên Thú Cưng", placeholder="Phượng Hoàng Lửa")
-    rarity = discord.ui.TextInput(label="Độ hiếm (thuong/hiem/than_thoai)", placeholder="than_thoai")
+    rarity = discord.ui.TextInput(label="Độ hiếm", placeholder="than_thoai")
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_message(f"✅ Đã thêm dòng Pet `{self.pet_key.value}` vào hệ thống thành công!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Đã thêm dòng Pet `{self.pet_key.value}` thành công!", ephemeral=True)
 
-class AddShopItemModal(discord.ui.Modal, title="➕ Thêm Vật Phẩm / Quả / Trái Vào Shop"):
-    item_id = discord.ui.TextInput(label="Mã vật phẩm (vd: qua_tao_vang)", placeholder="qua_tao_vang")
-    item_name = discord.ui.TextInput(label="Tên kèm Emoji hiển thị", placeholder="🍎 Quả táo thần")
+class AddShopItemModal(discord.ui.Modal, title="➕ Thêm Vật Phẩm Vào Shop"):
+    item_id = discord.ui.TextInput(label="Mã vật phẩm", placeholder="qua_tao_vang")
+    item_name = discord.ui.TextInput(label="Tên kèm Emoji", placeholder="🍎 Quả táo thần")
     item_price = discord.ui.TextInput(label="Giá điểm mua", placeholder="500")
     item_type = discord.ui.TextInput(label="Loại (moi / can / exp / power)", placeholder="power")
 
@@ -399,21 +424,16 @@ class AddShopItemModal(discord.ui.Modal, title="➕ Thêm Vật Phẩm / Quả /
                 "add_exp": 500
             }
             save_pet_shop_items(pet_items)
-            await interaction.response.send_message(f"✅ Đã thêm vật phẩm **{self.item_name.value}** vào shop thành công!", ephemeral=True)
+            await interaction.response.send_message(f"✅ Đã thêm vật phẩm **{self.item_name.value}** vào shop!", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Lỗi: {e}", ephemeral=True)
 
-# --- MENU CHỌN VÀ MUA TRỰC TIẾP ---
 class ShopSelect(discord.ui.Select):
     def __init__(self, items_dict, category):
         self.category = category
         options = []
         for k, v in items_dict.items():
-            # Giới hạn nhãn mô tả trong 100 kí tự theo chuẩn Discord
-            label_text = v['name'][:100]
-            desc_text = f"Giá: {v['price']} điểm"[:100]
-            options.append(discord.SelectOption(label=label_text, value=k, description=desc_text))
-            
+            options.append(discord.SelectOption(label=v['name'][:100], value=k, description=f"Giá: {v['price']} điểm"[:100]))
         super().__init__(placeholder="👇 Chọn món hàng bạn muốn mua ngay...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -423,14 +443,9 @@ class ShopSelect(discord.ui.Select):
         fishing_items = load_fishing_items()
         pet_items = load_pet_shop_items()
         
-        item_data = None
-        if self.category == "fishing":
-            item_data = fishing_items.get(selected_item_id)
-        else:
-            item_data = pet_items.get(selected_item_id)
-            
+        item_data = fishing_items.get(selected_item_id) if self.category == "fishing" else pet_items.get(selected_item_id)
         if not item_data:
-            await interaction.response.send_message("❌ Vật phẩm này không còn tồn tại trong hệ thống!", ephemeral=True)
+            await interaction.response.send_message("❌ Vật phẩm không tồn tại!", ephemeral=True)
             return
             
         price = item_data["price"]
@@ -438,13 +453,11 @@ class ShopSelect(discord.ui.Select):
         user_points = user_data.get(user_id, {}).get("weekly", 0)
         
         if user_points < price:
-            await interaction.response.send_message(f"❌ Bạn không đủ điểm để mua **{item_data['name']}**. Cần `{price} điểm`, bạn đang có `{user_points} điểm` tuần.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Không đủ điểm! Cần `{price} điểm`, bạn có `{user_points} điểm` tuần.", ephemeral=True)
             return
             
-        # Trừ điểm
         add_points(user_id, -price)
         
-        # Lưu vào kho người chơi
         pets_data = load_pets()
         if user_id not in pets_data:
             pets_data[user_id] = {"type": None, "level": 1, "exp": 0, "perm_power": 0, "temp_power": 0, "buff_until": 0, "inventory": {}}
@@ -452,17 +465,13 @@ class ShopSelect(discord.ui.Select):
             pets_data[user_id]["inventory"] = {}
             
         user_inv = pets_data[user_id]["inventory"]
-        
         if self.category == "fishing":
-            if item_data.get("type") == "moi":
-                user_inv["active_moi"] = selected_item_id
-            elif item_data.get("type") == "can":
-                user_inv["active_can"] = selected_item_id
+            if item_data.get("type") == "moi": user_inv["active_moi"] = selected_item_id
+            elif item_data.get("type") == "can": user_inv["active_can"] = selected_item_id
         else:
             if item_data.get("type") == "exp":
                 p = pets_data[user_id]
-                if p.get("type"):
-                    add_exp_to_pet(p, item_data.get("add_exp", 0))
+                if p.get("type"): add_exp_to_pet(p, item_data.get("add_exp", 0))
             elif item_data.get("type") == "power":
                 p = pets_data[user_id]
                 if item_data.get("perm", False):
@@ -481,46 +490,41 @@ class ShopCategoryView(discord.ui.View):
     @discord.ui.button(label="Cửa Hàng Câu Cá", style=discord.ButtonStyle.primary, emoji="🎣", custom_id="shop_fishing")
     async def shop_fishing(self, interaction: discord.Interaction, button: discord.ui.Button):
         fishing_items = load_fishing_items()
-        desc = "🛍️ **DANH SÁCH CẦN & MỒI CÂU (Chọn bên dưới để mua ngay):**\n"
+        desc = "🛍️ **CẦN & MỒI CÂU:**\n"
         for k, v in fishing_items.items():
-            desc += f"• **{v['name']}** — Giá: `{v['price']} điểm`\n"
+            desc += f"• **{v['name']}** — `{v['price']} điểm`\n"
         embed = discord.Embed(title="🛒 SHOP CÂU CÁ", description=desc, color=discord.Color.green())
         
         view = discord.ui.View(timeout=None)
         view.add_item(ShopSelect(fishing_items, "fishing"))
-        # Giữ lại các nút điều hướng chuyển shop
-        for child in self.children:
-            view.add_item(child)
-            
+        for child in self.children: view.add_item(child)
         await interaction.response.edit_message(embed=embed, view=view)
 
-    @discord.ui.button(label="Cửa Hàng Thú Cưng & Quả/Trái", style=discord.ButtonStyle.success, emoji="🍎", custom_id="shop_pet")
+    @discord.ui.button(label="Cửa Hàng Thú Cưng", style=discord.ButtonStyle.success, emoji="🍎", custom_id="shop_pet")
     async def shop_pet(self, interaction: discord.Interaction, button: discord.ui.Button):
         pet_items = load_pet_shop_items()
-        desc = "🛍️ **THỨC ĂN, QUẢ TRÁI & VẬT PHẨM PET (Chọn bên dưới để mua ngay):**\n"
+        desc = "🛍️ **THỨC ĂN & VẬT PHẨM PET:**\n"
         for k, v in pet_items.items():
-            desc += f"• **{v['name']}** — Giá: `{v['price']} điểm`\n"
-        embed = discord.Embed(title="🛒 SHOP THÚ CƯNG & QUẢ TRÁI", description=desc, color=discord.Color.purple())
+            desc += f"• **{v['name']}** — `{v['price']} điểm`\n"
+        embed = discord.Embed(title="🛒 SHOP THÚ CƯNG", description=desc, color=discord.Color.purple())
         
         view = discord.ui.View(timeout=None)
         view.add_item(ShopSelect(pet_items, "pet"))
-        for child in self.children:
-            view.add_item(child)
-            
+        for child in self.children: view.add_item(child)
         await interaction.response.edit_message(embed=embed, view=view)
 
-    @discord.ui.button(label="➕ Thêm Vật Phẩm / Quả Mới (Admin)", style=discord.ButtonStyle.danger, emoji="⚙️", custom_id="shop_admin_add")
+    @discord.ui.button(label="➕ Thêm Item (Admin)", style=discord.ButtonStyle.danger, emoji="⚙️", custom_id="shop_admin_add")
     async def shop_admin_add(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ Chỉ có **Admin** mới được dùng tính năng này!", ephemeral=True)
+            await interaction.response.send_message("❌ Chỉ Admin mới được dùng!", ephemeral=True)
             return
         await interaction.response.send_modal(AddShopItemModal())
 
-@bot.tree.command(name="shop", description="Mở cửa hàng tổng hợp có thể chọn và mua trực tiếp")
+@bot.tree.command(name="shop", description="Mở cửa hàng tổng hợp mua sắm trực tiếp")
 async def shop(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🏬 TRUNG TÂM MUA SẮM (SHOP)",
-        description="Chào mừng bạn đến với cửa hàng! Hãy lựa chọn danh mục bên dưới, sau đó dùng menu thả xuống để mua trực tiếp.",
+        description="Chào mừng bạn! Chọn danh mục bên dưới và dùng menu thả xuống để mua ngay.",
         color=discord.Color.gold()
     )
     await interaction.response.send_message(embed=embed, view=ShopCategoryView())
@@ -534,14 +538,14 @@ class PetMainView(discord.ui.View):
     async def open_egg(self, interaction: discord.Interaction, button: discord.ui.Button):
         data = load_data()
         if data.get(self.user_id, {}).get("weekly", 0) < 100:
-            await interaction.response.send_message("❌ Bạn cần tối thiểu 100 điểm để mở trứng!", ephemeral=True)
+            await interaction.response.send_message("❌ Cần tối thiểu 100 điểm tuần để mở trứng!", ephemeral=True)
             return
         add_points(self.user_id, -100)
         pet_choice = random.choice(list(PET_DATABASE.keys()))
         pets = load_pets()
         pets[self.user_id] = {"type": pet_choice, "level": 1, "exp": 0, "perm_power": 0, "temp_power": 0, "buff_until": 0}
         save_pets(pets)
-        await interaction.response.send_message(f"🎉 Mở trứng thành công! Nhận được Thần Thú: **{PET_DATABASE[pet_choice]['name']}**!", ephemeral=True)
+        await interaction.response.send_message(f"🎉 Mở trứng thành công! Nhận được **{PET_DATABASE[pet_choice]['name']}**!", ephemeral=True)
 
     @discord.ui.button(label="Cho Pet Ăn (+100 EXP)", style=discord.ButtonStyle.primary, emoji="🍖")
     async def feed_pet(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -552,12 +556,12 @@ class PetMainView(discord.ui.View):
             return
         add_exp_to_pet(p, 100)
         save_pets(pets)
-        await interaction.response.send_message(f"🍖 Cho Pet ăn thành công! Cấp độ hiện tại: `{p['level']}`, EXP: `{p['exp']}`", ephemeral=True)
+        await interaction.response.send_message(f"🍖 Cho Pet ăn thành công! Cấp độ: `{p['level']}`, EXP: `{p['exp']}`", ephemeral=True)
 
-    @discord.ui.button(label="➕ Thêm Pet Mới (Admin)", style=discord.ButtonStyle.danger, emoji="🛠️")
+    @discord.ui.button(label="Thêm Pet (Admin)", style=discord.ButtonStyle.danger, emoji="🛠️")
     async def add_pet_admin(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ Chỉ có **Admin** mới được thêm Pet!", ephemeral=True)
+            await interaction.response.send_message("❌ Chỉ Admin mới được dùng!", ephemeral=True)
             return
         await interaction.response.send_modal(AddPetModal())
 
@@ -567,7 +571,7 @@ async def nuoithu(interaction: discord.Interaction):
     pets = load_pets()
     p = pets.get(user_id)
     if not p:
-        embed = discord.Embed(title="🥚 NUÔI THÚ ẢO", description="Bạn chưa sở hữu thú cưng nào. Nhấn nút bên dưới để mở trứng!", color=discord.Color.gold())
+        embed = discord.Embed(title="🥚 NUÔI THÚ ẢO", description="Bạn chưa sở hữu thú cưng. Nhấn nút bên dưới để mở trứng!", color=discord.Color.gold())
     else:
         name = get_pet_name(p)
         pwr = calculate_pet_power(p)
@@ -585,10 +589,10 @@ class PvPConfirmView(discord.ui.View):
         self.target_id = target_id
         self.value = None
 
-    @discord.ui.button(label="Đồng Ý Thách Đấu", style=discord.ButtonStyle.green, emoji="⚔️")
+    @discord.ui.button(label="Đồng Ý", style=discord.ButtonStyle.green, emoji="⚔️")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         if str(interaction.user.id) != self.target_id:
-            await interaction.response.send_message("❌ Lời mời này không dành cho bạn!", ephemeral=True)
+            await interaction.response.send_message("❌ Lời mời không dành cho bạn!", ephemeral=True)
             return
         self.value = True
         self.stop()
@@ -597,13 +601,13 @@ class PvPConfirmView(discord.ui.View):
     @discord.ui.button(label="Từ Chối", style=discord.ButtonStyle.red, emoji="🚫")
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
         if str(interaction.user.id) != self.target_id:
-            await interaction.response.send_message("❌ Lời mời này không dành cho bạn!", ephemeral=True)
+            await interaction.response.send_message("❌ Lời mời không dành cho bạn!", ephemeral=True)
             return
         self.value = False
         self.stop()
         await interaction.message.edit(content="❌ Trận đấu PvP đã bị từ chối.", view=None)
 
-@bot.tree.command(name="pvp_pet", description="Thách đấu PvP Thú cưng với người chơi khác (Cần sự đồng ý)")
+@bot.tree.command(name="pvp_pet", description="Thách đấu PvP Thú cưng với người chơi khác")
 async def pvp_pet(interaction: discord.Interaction, target: discord.Member):
     user_id = str(interaction.user.id)
     target_id = str(target.id)
@@ -615,15 +619,15 @@ async def pvp_pet(interaction: discord.Interaction, target: discord.Member):
     pets = load_pets()
     p1, p2 = pets.get(user_id), pets.get(target_id)
     if not p1 or not p2:
-        await interaction.response.send_message("❌ Cả hai người chơi đều phải sở hữu Thú Cưng để PvP!", ephemeral=True)
+        await interaction.response.send_message("❌ Cả hai người chơi đều phải có Thú Cưng!", ephemeral=True)
         return
 
     view = PvPConfirmView(user_id, target_id)
-    await interaction.response.send_message(f"⚔️ {target.mention}, bạn nhận được lời thách đấu PvP Pet từ {interaction.user.mention}. Bạn có đồng ý không?", view=view)
+    await interaction.response.send_message(f"⚔️ {target.mention}, bạn nhận được lời thách đấu PvP từ {interaction.user.mention}. Bạn có đồng ý không?", view=view)
     
     await view.wait()
     if view.value is None:
-        await interaction.edit_original_response(content="⏰ Đã quá thời gian chờ phản hồi lời mời PvP.", view=None)
+        await interaction.edit_original_response(content="⏰ Đã quá thời gian chờ phản hồi.", view=None)
         return
     if not view.value:
         return
@@ -632,17 +636,14 @@ async def pvp_pet(interaction: discord.Interaction, target: discord.Member):
     p2_pwr = calculate_pet_power(p2)
     reward = random.randint(50, 150)
 
-    if p1_pwr == p2_pwr:
-        win_p1 = random.choice([True, False])
-    elif p1_pwr > p2_pwr:
-        win_p1 = random.random() < 0.60
-    else:
-        win_p1 = random.random() < 0.40
+    if p1_pwr == p2_pwr: win_p1 = random.choice([True, False])
+    elif p1_pwr > p2_pwr: win_p1 = random.random() < 0.60
+    else: win_p1 = random.random() < 0.40
 
     embed = discord.Embed(title="🔥 KẾT QUẢ TRẬN ĐẤU PVP PET", color=discord.Color.red())
     if win_p1:
         add_points(user_id, reward)
-        embed.description = f"🎉 **{interaction.user.mention}** đã chiến thắng đối thủ và nhận **+{reward} điểm**!"
+        embed.description = f"🎉 **{interaction.user.mention}** đã chiến thắng và nhận **+{reward} điểm**!"
     else:
         add_points(target_id, reward)
         embed.description = f"🎉 **{target.mention}** đã phản công chiến thắng và nhận **+{reward} điểm**!"
@@ -650,10 +651,10 @@ async def pvp_pet(interaction: discord.Interaction, target: discord.Member):
     await interaction.edit_original_response(content=None, embed=embed, view=None)
 
 class AddBossModal(discord.ui.Modal, title="➕ Thêm Boss Mới Vào Tháp (Admin)"):
-    boss_floor = discord.ui.TextInput(label="Số Tầng Boss (vd: 11)", placeholder="11")
-    boss_name = discord.ui.TextInput(label="Tên Boss kèm Emoji", placeholder="💀 Trùm Cuối Tối Thượng")
+    boss_floor = discord.ui.TextInput(label="Số Tầng Boss", placeholder="11")
+    boss_name = discord.ui.TextInput(label="Tên Boss kèm Emoji", placeholder="💀 Trùm Cuối")
     boss_power = discord.ui.TextInput(label="Lực chiến yêu cầu", placeholder="5000000")
-    boss_reward = discord.ui.TextInput(label="Điểm thưởng khi thắng", placeholder="10000")
+    boss_reward = discord.ui.TextInput(label="Điểm thưởng thắng", placeholder="10000")
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -664,50 +665,58 @@ class AddBossModal(discord.ui.Modal, title="➕ Thêm Boss Mới Vào Tháp (Adm
                 "reward": int(self.boss_reward.value.strip())
             }
             save_boss_tower(boss_tower)
-            await interaction.response.send_message(f"✅ Đã thêm Boss tầng {self.boss_floor.value} thành công!", ephemeral=True)
+            await interaction.response.send_message(f"✅ Đã thêm Boss tầng `{self.boss_floor.value}` thành công!", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Lỗi: {e}", ephemeral=True)
 
-class BossTowerView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+class BossView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=60)
+        self.user_id = str(user_id)
 
-    @discord.ui.button(label="Khiêu Chiến Boss", style=discord.ButtonStyle.danger, emoji="⚔️", custom_id="btn_danh_boss")
-    async def danh_boss(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user_id = str(interaction.user.id)
+    @discord.ui.button(label="Khiêu Chiến Boss Tháp ⚔️", style=discord.ButtonStyle.danger)
+    async def fight_boss(self, interaction: discord.Interaction, button: discord.ui.Button):
         pets = load_pets()
-        p = pets.get(user_id)
+        p = pets.get(self.user_id)
         if not p:
-            await interaction.response.send_message("❌ Bạn cần có Pet để khiêu chiến Boss!", ephemeral=True)
+            await interaction.response.send_message("❌ Bạn cần có Pet để khiêu chiến tháp Boss!", ephemeral=True)
             return
+            
         pwr = calculate_pet_power(p)
         boss_tower = load_boss_tower()
         
-        b = boss_tower.get("1", {"name": "👾 Quái nhỏ", "power": 20, "reward": 100})
-        if pwr >= b["power"]:
-            add_points(user_id, b["reward"])
-            await interaction.response.send_message(f"🏆 Pet của bạn đã hạ gục **{b['name']}** và nhận **+{b['reward']} điểm**!", ephemeral=True)
+        # Chọn ngẫu nhiên hoặc tính theo tầng cơ bản
+        floor_key = random.choice(list(boss_tower.keys()))
+        boss = boss_tower[floor_key]
+        
+        if pwr >= boss["power"]:
+            reward = boss["reward"]
+            add_points(self.user_id, reward)
+            await interaction.response.send_message(f"🎉 **CHIẾN THẮNG!** Pet của bạn đã hạ gục **{boss['name']}** (Tầng {floor_key}) và nhận thưởng **+{reward} điểm**!")
         else:
-            await interaction.response.send_message(f"❌ Lực chiến Pet của bạn (`{pwr}`) không đủ để thắng **{b['name']}** (Cần `{b['power']}`).", ephemeral=True)
+            await interaction.response.send_message(f"💀 **THẤT BẠI!** Lực chiến Pet của bạn (`{pwr}`) quá yếu so với **{boss['name']}** (Yêu cầu: `{boss['power']}`). Hãy luyện tập thêm!")
 
-    @discord.ui.button(label="➕ Thêm Boss (Admin)", style=discord.ButtonStyle.secondary, emoji="👑", custom_id="btn_them_boss")
-    async def them_boss(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Thêm Boss Mới (Admin) ➕", style=discord.ButtonStyle.secondary)
+    async def add_boss_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ Chỉ có **Admin** mới được dùng tính năng này!", ephemeral=True)
+            await interaction.response.send_message("❌ Chỉ Admin mới được dùng!", ephemeral=True)
             return
         await interaction.response.send_modal(AddBossModal())
 
-@bot.tree.command(name="danhboss", description="Đưa Pet đi khiêu chiến Tháp Boss nhận thưởng lớn")
-async def danhboss(interaction: discord.Interaction):
+@bot.tree.command(name="boss", description="Khiêu chiến tháp Boss bằng Thú cưng")
+async def boss(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🏰 THÁP KHIÊU CHIẾN BOSS",
-        description="Sử dụng sức mạnh thú cưng của bạn để vượt qua các tầng tháp khắc nghiệt.",
+        title="🏰 THÁP BOSS THẦN THÚ",
+        description="Thách thức các thế lực hắc ám để mang về phần thưởng điểm số khổng lồ!",
         color=discord.Color.dark_red()
     )
-    await interaction.response.send_message(embed=embed, view=BossTowerView())
+    await interaction.response.send_message(embed=embed, view=BossView(interaction.user.id))
 
-# --- CHẠY WEB SERVER VÀ BOT ---
+# --- KHỞI CHẠY BOT ---
 if __name__ == "__main__":
     keep_alive()
-    TOKEN = os.getenv("DISCORD_TOKEN", "THAY_TOKEN_CUA_BAN_VAO_DAY")
-    bot.run(TOKEN)
+    TOKEN = os.getenv("DISCORD_TOKEN")
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("[ERROR] Không tìm thấy biến môi trường DISCORD_TOKEN!")
