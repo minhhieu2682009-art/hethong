@@ -316,8 +316,77 @@ async def causong(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=CauSongView())
 
 # ==============================================================================
-# --- 6. HỆ THỐNG /SHOP & /NUOITHU (PET & SHOP TÍCH HỢP) ---
+# --- HỆ THỐNG MUA HÀNG NHANH QUA SELECT MENU TRONG /SHOP ---
 # ==============================================================================
+
+class ShopSelect(discord.ui.Select):
+    def __init__(self):
+        # Danh sách các vật phẩm mẫu trong shop (bạn có thể thay đổi tùy theo dữ liệu của bot)
+        options = [
+            discord.SelectOption(label="Kí quỷ (+10 EXP)", description="Giá: 10 điểm", emoji="❤️", value="ki_quy"),
+            discord.SelectOption(label="Ngao thị (+200 EXP)", description="Giá: 1000 điểm", emoji="🐛", value="ngao_thi"),
+            discord.SelectOption(label="Thịt long thú (+10,000 EXP)", description="Giá: 10000 điểm", emoji="🍖", value="thit_long_thu"),
+            discord.SelectOption(label="Cam dương (+20 Pwr/10p)", description="Giá: 300 điểm", emoji="🍎", value="cam_duong"),
+            discord.SelectOption(label="Nấm kỳ lung (+100 Pwr/10p)", description="Giá: 1000 điểm", emoji="🍄", value="nam_ky_lung"),
+            discord.SelectOption(label="Tinh cầu (+10 Pwr vĩnh viễn)", description="Giá: 10000 điểm", emoji="🪐", value="tinh_cau")
+        ]
+        super().__init__(placeholder="🛒 Chọn món đồ bạn muốn mua ngay...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        item_key = self.values[0]
+        
+        # Bảng giá tương ứng với vật phẩm
+        prices = {
+            "ki_quy": 10,
+            "ngao_thi": 1000,
+            "thit_long_thu": 10000,
+            "cam_duong": 300,
+            "nam_ky_lung": 1000,
+            "tinh_cau": 10000
+        }
+        
+        cost = prices.get(item_key, 0)
+        
+        # Lấy dữ liệu người dùng để kiểm tra số điểm hiện có (hàm load_data() của bạn)
+        data = load_data()
+        user_id_str = str(interaction.user.id)
+        
+        if user_id_str not in data:
+            data[user_id_str] = {"weekly": 0, "total": 0, "inventory": {}}
+            
+        # Kiểm tra điểm tổng hoặc điểm tuần tùy hệ thống của bạn (ở đây ví dụ dùng tổng điểm hoặc điểm tuần)
+        user_points = data[user_id_str].get("weekly", 0)
+        
+        if user_points < cost:
+            await interaction.response.send_message(f"❌ Bạn không đủ điểm để mua vật phẩm này! Cần **{cost}** điểm.", ephemeral=True)
+            return
+            
+        # Trừ điểm và thêm vật phẩm vào kho (inventory)
+        data[user_id_str]["weekly"] = user_points - cost
+        if "inventory" not in data[user_id_str]:
+            data[user_id_str]["inventory"] = {}
+            
+        data[user_id_str]["inventory"][item_key] = data[user_id_str]["inventory"].get(item_key, 0) + 1
+        
+        # Lưu lại dữ liệu (hàm save_data của bạn)
+        # save_data(data) 
+        
+        await interaction.response.send_message(f"✅ Mua thành công **{self.values[0]}** với giá **{cost}** điểm!", ephemeral=True)
+
+class ShopViewWithSelect(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+        # Thêm Select Menu vào giao diện
+        self.add_item(ShopSelect())
+
+    # Bạn có thể giữ nguyên các nút chuyển danh mục ở đây nếu muốn
+    @discord.ui.button(label="Cửa Hàng Câu Cá", style=discord.ButtonStyle.primary, emoji="🎣", row=1)
+    async def fishing_shop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Đã chuyển sang danh mục Cửa Hàng Câu Cá!", ephemeral=True)
+
+    @discord.ui.button(label="Thú Cưng & Quả/Trái", style=discord.ButtonStyle.success, emoji="🍎", row=1)
+    async def pet_shop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Đã chuyển sang danh mục Thú Cưng & Quả/Trái!", ephemeral=True)
 
 PET_DATABASE = {
     "sutu": {"name": "Sư tử con", "rarity": "thuong", "forms": {1: "🦁 sư tử con", 2: "🐅 vương sư", 3: "⚡🐅 thần hổ sét"}, "exp_caps": {1: 100, 2: 1100, 3: 2000}, "base_pwr": 10, "high_pwr": 100},
