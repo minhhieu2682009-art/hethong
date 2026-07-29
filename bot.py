@@ -72,9 +72,9 @@ def save_config(cfg): safe_save_json(CONFIG_FILE, cfg)
 
 def load_titles():
     default_titles = {
-        "1": {"icon": "👑", "name": "Đoàn Trưởng"},
-        "2": {"icon": "⚔️", "name": "Thần Thương"},
-        "3": {"icon": "🐎", "name": "Kị Vương"}
+        "1": {"icon": "👑", "name": "Dạ Minh Tiên Tôn"},
+        "2": {"icon": "😈", "name": "U Minh Quỷ Đế"},
+        "3": {"icon": "🐢", "name": "Thiên Cơ Đạo Trưởng"}
     }
     return safe_load_json(TITLES_FILE, default_titles)
 
