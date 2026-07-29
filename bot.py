@@ -204,6 +204,7 @@ def add_custom_title(user_id: str, title_str: str):
         save_data(data)
 
 chat_cooldowns = {}
+fishing_cooldowns = {}
 
 # --- 3. CẤU HÌNH BOT ---
 intents = discord.Intents.default()
@@ -212,6 +213,10 @@ intents.members = True
 intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+class ShopView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
 async def process_weekly_rewards():
     data = load_data()
@@ -374,7 +379,6 @@ async def before_minigame():
 async def on_ready():
     print(f"[SYSTEM] Bot đã đăng nhập thành công: {bot.user}")
     
-    # --- ĐĂNG KÝ VIEW VĨNH VIỄN ---
     bot.add_view(ShopView())
     bot.add_view(CauSongView())
     print("[SYSTEM] Đã kích hoạt Persistent View (Vĩnh viễn) cho Shop và Cầu Sông!")
@@ -453,6 +457,20 @@ class CauSongView(discord.ui.View):
     @discord.ui.button(label="Thả Cần Câu Cá 🎣", style=discord.ButtonStyle.success, custom_id="causong_fish_btn")
     async def fish_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
+        current_time = time.time()
+        
+        if user_id in fishing_cooldowns:
+            time_passed = current_time - fishing_cooldowns[user_id]
+            if time_passed < 30:
+                remaining = int(30 - time_passed)
+                await interaction.response.send_message(
+                    f"⏳ **Bạn thao tác quá nhanh!** Hãy nghỉ ngơi chút, vui lòng chờ **{remaining} giây** nữa để thả cần tiếp.", 
+                    ephemeral=True
+                )
+                return
+
+        fishing_cooldowns[user_id] = current_time
+
         user_pets_data = load_pets()
         user_inventory = user_pets_data.get(user_id, {}).get("inventory", {})
 
@@ -468,7 +486,7 @@ class CauSongView(discord.ui.View):
             base_success_rate += fishing_items[active_can].get("succ_bonus", 0)
 
         if random.random() > base_success_rate:
-            await interaction.response.send_message("🎣 **Rất tiếc!** Bạn đã quăng cần nhưng cá cắn hụt, câu thất bại rồi!", ephemeral=True)
+            await interaction.response.send_message(f"🎣 {interaction.user.mention} **rất tiếc!** Bạn đã quăng cần nhưng cá cắn hụt, câu thất bại rồi!")
             return
 
         fish_table = load_fish_table()
@@ -489,7 +507,7 @@ class CauSongView(discord.ui.View):
 
         embed = discord.Embed(
             title="🎣 BẬT CẦN TRÚNG LỚN!",
-            description=f"Bạn đã giật cần thành công và bắt được **{caught['name']}**!",
+            description=f"{interaction.user.mention} đã giật cần thành công và bắt được **{caught['name']}**!",
             color=discord.Color.blue()
         )
         if pts >= 0:
@@ -743,128 +761,25 @@ async def nuoithu(interaction: discord.Interaction):
 
     if not p or "type" not in p:
         embed = discord.Embed(
-            title="🥚 BẠN CHƯA CÓ THÚ CƯNG",
-            description="Hãy nhấn nút **Mở Trứng Pet (100đ)** bên dưới để thử vận may nhận Thần Thú!",
-            color=discord.Color.gold()
+            title=f"✨ TRANG TRẠI THÚ CƯNG CỦA {interaction.user.display_name.upper()} ✨",
+            description="Bạn **chưa sở hữu** thần thú nào! Hãy dùng nút bên dưới để mở quả trứng đầu tiên.",
+            color=discord.Color.purple()
         )
-        embed.add_field(name="💰 Số dư hiện tại", value=f"`{user_pts:,}` điểm")
+        embed.add_field(name="💰 Điểm Hiện Có", value=f"🪙 **Số dư:** `{user_pts:,}` điểm", inline=False)
+        embed.set_footer(text="Mở trứng chỉ tốn 100 điểm!")
+        
+        view = PetView(interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     else:
         embed = create_pet_embed(interaction.user.display_name, p, user_pts)
+        view = PetView(interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    view = PetView(user_id)
-    await interaction.response.send_message(embed=embed, view=view)
-
-# ==============================================================================
-# --- 7. HỆ THỐNG CỬA HÀNG (/shop) VỚI NÚT THÊM VẬT PHẨM DÀNH CHO ADMIN ---
-# ==============================================================================
-
-class AddShopItemModal(discord.ui.Modal, title="🛒 [ADMIN] Thêm Vật Phẩm Vào Shop"):
-    shop_target = discord.ui.TextInput(label="Shop (fishing hoặc pet)", placeholder="Nhập: fishing hoặc pet", default="pet", required=True)
-    item_id = discord.ui.TextInput(label="ID Vật phẩm (không dấu)", placeholder="vd: qua_tao_vang", required=True)
-    item_name = discord.ui.TextInput(label="Tên Vật phẩm (kèm Icon)", placeholder="vd: 🍎 Quả Táo Vàng", required=True)
-    item_price = discord.ui.TextInput(label="Giá bán (điểm)", default="500", required=True)
-    item_val = discord.ui.TextInput(label="Chỉ số tăng (+0.05 tỉ lệ hoặc +100 EXP)", default="100", required=True)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ Chỉ Admin mới có quyền thêm đồ Shop!", ephemeral=True)
-            return
-
-        target = self.shop_target.value.strip().lower()
-        i_id = self.item_id.value.strip()
-        i_name = self.item_name.value.strip()
-
-        try:
-            price = int(self.item_price.value)
-            val = float(self.item_val.value)
-        except ValueError:
-            await interaction.response.send_message("❌ Giá và chỉ số phải là số!", ephemeral=True)
-            return
-
-        if target == "fishing":
-            shop = load_fishing_shop()
-            shop[i_id] = {
-                "name": i_name,
-                "type": "moi",
-                "rarity": "Đặc Biệt ✨",
-                "price": price,
-                "succ_bonus": val
-            }
-            save_fishing_shop(shop)
-        else:
-            shop = load_pet_items()
-            shop[i_id] = {
-                "name": i_name,
-                "price": price,
-                "type": "exp",
-                "add_exp": int(val)
-            }
-            save_pet_items(shop)
-
-        embed = discord.Embed(
-            title="✅ ĐÃ THÊM ĐỒ VÀO SHOP!",
-            description=f"🛒 **Cửa hàng:** `{target}`\n📦 **Món đồ:** {i_name}\n💰 **Giá:** `{price:,} điểm`",
-            color=discord.Color.green()
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-class ShopView(discord.ui.View):
-    def __init__(self):
-        # Đặt timeout=None để bảng shop hoạt động vĩnh viễn
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Cửa Hàng Câu Cá 🎣", style=discord.ButtonStyle.primary, custom_id="shop_fishing_btn")
-    async def fishing_shop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        shop = load_fishing_shop()
-        embed = discord.Embed(
-            title="🎣 CỬA HÀNG CẦN & MỒI CÂU CÁ",
-            description="Trang bị Cần & Mồi để gia tăng tỉ lệ bắt cá hiếm khi `/causong`!",
-            color=discord.Color.blue()
-        )
-        for key, item in shop.items():
-            succ = f"+{int(item.get('succ_bonus', 0) * 100)}%"
-            embed.add_field(
-                name=f"{item['name']} ({item.get('rarity', 'Thường')})",
-                value=f"> 💰 Giá: `{item['price']:,}` điểm\n> ✨ Tỉ lệ bonus: `{succ}`",
-                inline=True
-            )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @discord.ui.button(label="Cửa Hàng Thức Ăn Pet 🍖", style=discord.ButtonStyle.success, custom_id="shop_pet_btn")
-    async def pet_shop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        items = load_pet_items()
-        embed = discord.Embed(
-            title="🍖 CỬA HÀNG ĐỒ ĂN & BUFF PET",
-            description="Mua vật phẩm giúp Pet thăng cấp nhanh và tăng sức mạnh!",
-            color=discord.Color.green()
-        )
-        for key, item in items.items():
-            desc = f"+{item.get('add_exp', 0)} EXP" if item.get('type') == 'exp' else f"+{item.get('buff_power', 0)} Pwr"
-            embed.add_field(
-                name=item['name'],
-                value=f"> 💰 Giá: `{item['price']:,}` điểm\n> ⚡ Tác dụng: `{desc}`",
-                inline=True
-            )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @discord.ui.button(label="Thêm Đồ Shop (Admin) ➕", style=discord.ButtonStyle.danger, custom_id="shop_admin_add_btn")
-    async def add_shop_admin_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ Chỉ Administrator mới được dùng tính năng này!", ephemeral=True)
-            return
-        await interaction.response.send_modal(AddShopItemModal())
-
-@bot.tree.command(name="shop", description="Mở cửa hàng vật phẩm trò chơi")
-async def shop_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🛒 HỆ THỐNG CỬA HÀNG VĨNH VIỄN 🛒",
-        description="Chào mừng bạn đến với Cửa Hàng Hệ Thống! Hãy bấm các nút bên dưới để chọn loại Cửa Hàng.",
-        color=discord.Color.gold()
-    )
-    view = ShopView()
-    await interaction.response.send_message(embed=embed, view=view)
-
-# --- CHẠY WEB SERVER VÀ BOT ---
-keep_alive()
-# Thay TOKEN_CỦA_BẠN bằng Token Discord Bot của bạn
-# bot.run("TOKEN_CỦA_BẠN")
+# --- 7. CHẠY BOT ---
+if __name__ == "__main__":
+    keep_alive()
+    TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
+    if not TOKEN:
+        print("[ERROR] Không tìm thấy DISCORD_BOT_TOKEN trong biến môi trường!")
+    else:
+        bot.run(TOKEN)
