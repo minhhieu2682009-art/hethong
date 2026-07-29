@@ -33,10 +33,10 @@ def keep_alive():
     t.start()
 
 # ==============================================================================
-# --- 2. BỘ TRUY XUẤT DỮ LIỆU TRONG RAM (KHÔNG NỔI LỖI FILE JSON) ---
+# --- 2. DỮ LIỆU LƯU TRONG RAM ---
 # ==============================================================================
 db_users = {}       # {user_id: {"weekly": 0, "total": 0, "titles": []}}
-db_pets = {}        # {user_id: {"type": ..., "level": 1, "exp": 0, ...}}
+db_pets = {}        # {user_id: {"type": ..., "level": 1, "exp": 0, "inventory": {}}}
 db_config = {"game_channel_id": None}
 
 db_titles = {
@@ -131,47 +131,25 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-async def process_weekly_rewards():
-    if not db_users:
-        return "❌ Không có dữ liệu điểm tuần để chốt."
+# ==============================================================================
+# --- 4. VIEW SHOP KHÔNG TIMEOUT (Persistent View: timeout=None) ---
+# ==============================================================================
+class ShopView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None) # Giữ Shop hoạt động vĩnh viễn
 
-    sorted_users = sorted(db_users.items(), key=lambda x: x[1].get("weekly", 0), reverse=True)[:3]
-    summary_lines = []
-    
-    for guild in bot.guilds:
-        roles = [
-            guild.get_role(ROLE_TOP1_ID),
-            guild.get_role(ROLE_TOP2_ID),
-            guild.get_role(ROLE_TOP3_ID)
-        ]
-        
-        for role in roles:
-            if role:
-                for member in role.members:
-                    try:
-                        await member.remove_roles(role)
-                    except Exception as e:
-                        print(f"[WARN] Không thể gỡ role {role.name}: {e}")
-
-        for index, (u_id, score) in enumerate(sorted_users):
-            member = guild.get_member(int(u_id))
-            target_role = roles[index] if index < len(roles) else None
-            
-            if member:
-                if target_role:
-                    try:
-                        await member.add_roles(target_role)
-                    except Exception as e:
-                        print(f"[WARN] Không thể trao role: {e}")
-                summary_lines.append(f"🥇 **Top {index+1}:** {member.mention} — `{score.get('weekly', 0)} điểm`")
-
-    for u_id in db_users:
-        db_users[u_id]["weekly"] = 0
-    
-    return "\n".join(summary_lines) if summary_lines else "Không tìm thấy thành viên Top trong Server."
+    @discord.ui.button(label="Xem Vật Phẩm Shop 🛒", style=discord.ButtonStyle.primary, custom_id="shop_view_items_btn")
+    async def view_items(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="🏪 CỬA HÀNG CẦN & MỒI CÂU CÁ", color=discord.Color.gold())
+        desc = ""
+        for item_id, item in db_fishing_shop.items():
+            desc += f"• **{item['name']}** (`{item_id}`)\n   Giá: `{item['price']}đ` | Tăng tỉ lệ: `+{int(item['succ_bonus']*100)}%`\n"
+        embed.description = desc
+        embed.set_footer(text="Dùng lệnh /buyshop <id_item> để mua vật phẩm!")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ==============================================================================
-# --- 4. TASKS TỰ ĐỘNG CHẠY NGẦM ---
+# --- 5. TASKS TỰ ĐỘNG CHẠY NGẦM ---
 # ==============================================================================
 @tasks.loop(minutes=1)
 async def auto_daily_leaderboard():
@@ -210,25 +188,6 @@ async def auto_daily_leaderboard():
         embed.add_field(name="🏆 Top Cống Hiến", value=desc if desc else "Chưa có dữ liệu.", inline=False)
         embed.set_footer(text="Hệ thống tích điểm tự động")
         await channel.send(embed=embed)
-
-@tasks.loop(minutes=1)
-async def auto_reset_weekly_top():
-    vietnam_tz = timezone(timedelta(hours=7))
-    now = datetime.now(vietnam_tz)
-    
-    if now.weekday() == 0 and now.hour == 0 and now.minute == 0:
-        msg = await process_weekly_rewards()
-        channel_id = db_config.get("game_channel_id")
-        if channel_id:
-            channel = bot.get_channel(channel_id)
-            if channel:
-                embed = discord.Embed(
-                    title="🎉 KẾT QUẢ ĐUA TOP TUẦN & RESET ĐIỂM 🎉",
-                    description=f"Chúc mừng các thành viên xuất sắc nhất tuần qua!\n\n{msg}",
-                    color=discord.Color.green(),
-                    timestamp=now
-                )
-                await channel.send(embed=embed)
 
 @tasks.loop(minutes=5)
 async def check_voice_points():
@@ -286,12 +245,12 @@ async def before_minigame():
 async def on_ready():
     print(f"[SYSTEM] Bot đã đăng nhập thành công: {bot.user}")
     
-    bot.add_view(CauSongView())
-    print("[SYSTEM] Đã kích hoạt Persistent View (Vĩnh viễn) cho Shop và Cầu Sông!")
+    # CHỈ ĐĂNG KÝ VIEW SHOP VĨNH VIỄN
+    bot.add_view(ShopView())
+    print("[SYSTEM] Đã kích hoạt Persistent View (Vĩnh viễn) cho SHOP!")
 
     if not check_voice_points.is_running(): check_voice_points.start()
     if not auto_minigame_task.is_running(): auto_minigame_task.start()
-    if not auto_reset_weekly_top.is_running(): auto_reset_weekly_top.start()
     if not auto_daily_leaderboard.is_running(): auto_daily_leaderboard.start()
         
     try:
@@ -316,7 +275,7 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # ==============================================================================
-# --- 5. CÂU CÁ & LỆNH /causong CÓ NÚT BẤM CÂU CÁ + THÊM CÁ (ADMIN) ---
+# --- 6. CÂU CÁ & LỆNH /causong (CÓ TIMEOUT = 60S - KHÔNG ĐẶT TIMEOUT=NONE) ---
 # ==============================================================================
 
 cooldown_fishing = {}
@@ -358,13 +317,26 @@ class AddFishModal(discord.ui.Modal, title="🎣 [ADMIN] Thêm Cá / Vật Phẩ
 
 class CauSongView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None) # timeout=None cho phép vĩnh viễn
+        # ĐẶT TIMEOUT = 60S (KHÔNG DÙNG timeout=None ĐỂ NÚT TỰ HẾT HẠN)
+        super().__init__(timeout=60)
+        self.message = None
 
-    @discord.ui.button(label="Thả Cần Câu Cá 🎣", style=discord.ButtonStyle.success, custom_id="causong_fish_btn")
+    async def on_timeout(self):
+        # Vô hiệu hóa nút khi hết thời gian 60s
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
+    @discord.ui.button(label="Thả Cần Câu Cá 🎣", style=discord.ButtonStyle.success)
     async def fish_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
         current_time = time.time()
 
+        # Cooldown 30s chống spam
         if user_id in cooldown_fishing:
             elapsed = current_time - cooldown_fishing[user_id]
             if elapsed < 30:
@@ -427,7 +399,7 @@ class CauSongView(discord.ui.View):
 
         await interaction.response.send_message(embed=embed, ephemeral=False)
 
-    @discord.ui.button(label="Thêm Cá Mới (Admin) ➕", style=discord.ButtonStyle.danger, custom_id="causong_add_fish_btn")
+    @discord.ui.button(label="Thêm Cá Mới (Admin) ➕", style=discord.ButtonStyle.danger)
     async def add_fish_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ Chỉ Administrator mới được sử dụng nút này!", ephemeral=True)
@@ -438,14 +410,25 @@ class CauSongView(discord.ui.View):
 async def causong(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🌊 BỜ SÔNG CÂU CÁ GIẢI TRÍ 🌊",
-        description="Hãy bấm nút **Thả Cần Câu Cá 🎣** bên dưới để trải nghiệm vận may của bạn!\n*Trang bị Cần & Mồi xịn tại `/shop` để tăng tỉ lệ thắng cá khủng.*",
+        description="Hãy bấm nút **Thả Cần Câu Cá 🎣** bên dưới để trải nghiệm vận may của bạn!\n*Nút câu cá sẽ tự khóa sau 60s không sử dụng.*",
         color=discord.Color.teal()
     )
     view = CauSongView()
     await interaction.response.send_message(embed=embed, view=view)
+    view.message = await interaction.original_response()
+
+@bot.tree.command(name="shop", description="Mở cửa hàng mua cần và mồi câu cá!")
+async def shop(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🏪 HỆ THỐNG SHOP CÂU CÁ",
+        description="Bấm nút bên dưới để xem vật phẩm câu cá!",
+        color=discord.Color.gold()
+    )
+    view = ShopView()
+    await interaction.response.send_message(embed=embed, view=view)
 
 # ==============================================================================
-# --- 6. HỆ THỐNG NUÔI THÚ ẢO (/nuoithu) CÓ NÚT THÊM PET DÀNH CHO ADMIN ---
+# --- 7. HỆ THỐNG NUÔI THÚ ẢO (/nuoithu) ---
 # ==============================================================================
 
 def calculate_pet_power(pet_data):
