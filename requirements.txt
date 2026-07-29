@@ -1,2 +1,41 @@
-discord.py
-flask
+import os
+import discord
+from discord.ext import commands
+from flask import Flask
+from threading import Thread
+
+# 1. Khởi tạo Flask app để Render nhận diện cổng web
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive and running!"
+
+def run():
+    # Render cung cấp biến môi trường PORT động, mặc định dùng 8080 nếu chạy test local
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# 2. Khởi tạo cấu hình Bot Discord của bạn ở đây
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+
+@bot.command()
+async def ping(ctx):
+    await ctx.send('Pong!')
+
+# 3. Chạy Flask server ngầm trước, sau đó chạy bot Discord
+if __name__ == "__main__":
+    keep_alive()
+    # Lấy token từ biến môi trường trên Render (hoặc thay thế bằng token của bạn)
+    TOKEN = os.environ.get("DISCORD_TOKEN") 
+    bot.run(TOKEN)
