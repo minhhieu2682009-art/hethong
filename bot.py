@@ -501,9 +501,15 @@ class ShopBuyDropdown(discord.ui.Select):
                 value=f"{prefix}_{key}",
                 description=val.get("desc", "Trang bị thượng cổ")[:100]
             ))
+        if not options:
+            options.append(discord.SelectOption(label="Trống", value="none", description="Chưa có vật phẩm."))
         super().__init__(placeholder="🛒 Chọn vật phẩm muốn mua...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "none":
+            await interaction.response.send_message("❌ Không có vật phẩm nào để mua!", ephemeral=True)
+            return
+            
         user_id = str(interaction.user.id)
         selected = self.values[0]
         prefix, key = selected.split("_", 1)
@@ -550,7 +556,7 @@ class GlobalShopView(discord.ui.View):
     async def shop_pet(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = discord.ui.View(timeout=60)
         view.add_item(ShopBuyDropdown(PET_ITEMS, "pet"))
-        embed = discord.Embed(title="🥩 ─── SHOP ĐỒ ĂN & TRANG BỊ PET ─── 🥩", color=discord.Color.green())
+        embed = discord.Embed(title="🥩 ─── SHOP ĐỒ ĂN & TRANG Bị PET ─── 🥩", color=discord.Color.green())
         for k, v in PET_ITEMS.items():
             embed.add_field(name=f"{v['name']} — `{v['price']}đ`", value=f"ℹ️ {v.get('desc','N/A')}", inline=False)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -560,7 +566,13 @@ class GlobalShopView(discord.ui.View):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ Chỉ Admin mới dùng được!", ephemeral=True)
             return
-        await interaction.response.send_modal(AddShopItemModal())
+        try:
+            # Bọc try-except để bắt lỗi modal và tránh timeout 3 giây của Discord
+            await interaction.response.send_modal(AddShopItemModal())
+        except Exception as e:
+            print(f"[LỖI SHOP UPDATE MODAL]: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"❌ Không thể mở bảng thêm vật phẩm: `{e}`", ephemeral=True)
 
 @bot.tree.command(name="shop", description="Mở cửa hàng Thượng Cổ mua trang bị và đồ ăn!")
 async def shop(interaction: discord.Interaction):
