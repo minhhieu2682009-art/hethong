@@ -763,9 +763,8 @@ async def tuido(interaction: discord.Interaction):
 
     if not inv:
         embed.add_field(name="Trạng thái", value="Túi đồ của bạn đang trống rỗng. Hãy ghé thăm `/shop` để mua sắm!", inline=False)
-        await interaction.response.send_embed = embed if hasattr(interaction.response, 'send_embed') else await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
-
     desc = ""
     for item_key, qty in inv.items():
         if qty <= 0:
