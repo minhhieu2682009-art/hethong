@@ -660,7 +660,123 @@ async def causong(interaction: discord.Interaction):
         color=discord.Color.teal()
     )
     await interaction.response.send_message(embed=embed, view=CauSongView())
+# ==============================================================================
+# --- 9. /TUIDO (TÚI ĐỒ & SỬ DỤNG VẬT PHẨM) ---
+# ==============================================================================
+class UseItemSelect(discord.ui.Select):
+    def __init__(self, inventory):
+        options = []
+        for item_key, quantity in inventory.items():
+            if quantity <= 0:
+                continue
+            # Tìm tên vật phẩm từ FISHING_ITEMS hoặc PET_ITEMS
+            item_info = FISHING_ITEMS.get(item_key) or PET_ITEMS.get(item_key)
+            if item_info:
+                name = item_info.get("name", item_key)
+                item_type = "Mồi/Cần" if item_key in FISHING_ITEMS else "Đồ Pet"
+                options.append(discord.SelectOption(
+                    label=f"{name} (x{quantity})",
+                    value=item_key,
+                    description=f"Loại: {item_type} - {item_info.get('desc', '')[:90]}"
+                ))
+        
+        if not options:
+            options.append(discord.SelectOption(label="Túi đồ trống", value="empty", description="Hãy mua thêm vật phẩm tại /shop"))
+            
+        super().__init__(placeholder="🎒 Chọn vật phẩm muốn sử dụng / cho pet ăn...", min_values=1, max_values=1, options=options)
 
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "empty":
+            await interaction.response.send_message("❌ Túi đồ của bạn đang trống!", ephemeral=True)
+            return
+
+        item_key = self.values[0]
+        u_id = str(interaction.user.id)
+        
+        pets = load_pets()
+        if u_id not in pets or "inventory" not in pets[u_id] or pets[u_id]["inventory"].get(item_key, 0) <= 0:
+            await interaction.response.send_message("❌ Bạn không còn sở hữu vật phẩm này trong túi đồ!", ephemeral=True)
+            return
+
+        # Kiểm tra xem đây là vật phẩm cho Pet hay Vật phẩm câu cá
+        if item_key in PET_ITEMS:
+            # Kiểm tra xem người chơi đã có Pet chưa
+            pet_data = pets[u_id].get("pet")
+            if not pet_data:
+                await interaction.response.send_message("❌ Bạn chưa có Linh Thú để sử dụng vật phẩm này! Hãy dùng `/nuoithu` để mở trứng.", ephemeral=True)
+                return
+
+            item_info = PET_ITEMS[item_key]
+            add_exp = item_info.get("add_exp", 0)
+            buff_pwr = item_info.get("buff_pwr", 0)
+            duration = item_info.get("duration", 0)
+
+            msg = f"🍖 Bạn đã cho Linh Thú ăn **{item_info['name']}** thành công!\n"
+
+            # Xử lý tăng EXP hoặc Buff lực chiến
+            if add_exp > 0:
+                leveled_up = add_exp_to_pet(pet_data, add_exp)
+                msg += f"✨ Nhận thêm **+{add_exp} EXP** cho Linh Thú!\n"
+                if leveled_up:
+                    new_name = get_pet_display_name(pet_data)
+                    msg += f"🎉 **LINH THÚ ĐÃ LÊN CẤP!** Hình thái hiện tại: **{new_name}** (Lv.{pet_data.get('level')})"
+
+            if buff_pwr > 0:
+                if duration > 0:
+                    pet_data["temp_power"] = buff_pwr
+                    pet_data["buff_until"] = time.time() + duration
+                    msg += f"⚡ Tăng tạm thời `+{buff_pwr} PWR` trong {duration // 60} phút!"
+                else:
+                    pet_data["perm_power"] = pet_data.get("perm_power", 0) + buff_pwr
+                    msg += f"🌟 Tăng vĩnh viễn `+{buff_pwr} PWR` cho Linh Thú!"
+
+            # Trừ số lượng item trong túi đồ
+            pets[u_id]["inventory"][item_key] -= 1
+            if pets[u_id]["inventory"][item_key] <= 0:
+                del pets[u_id]["inventory"][item_key]
+            save_pets(pets)
+
+            await interaction.response.send_message(msg, ephemeral=True)
+
+        elif item_key in FISHING_ITEMS:
+            item_info = FISHING_ITEMS[item_key]
+            await interaction.response.send_message(f"🎣 Vật phẩm **{item_info['name']}** thuộc loại trang bị câu cá. Nó sẽ **tự động kích hoạt** tỷ lệ khi bạn bấm quăng cần ở `/causong`!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Không xác định được loại vật phẩm này!", ephemeral=True)
+
+class InventoryView(discord.ui.View):
+    def __init__(self, inventory):
+        super().__init__(timeout=60)
+        self.add_item(UseItemSelect(inventory))
+
+@bot.tree.command(name="tuido", description="Mở túi đồ cá nhân để xem trang bị, mồi câu và cho pet ăn!")
+async def tuido(interaction: discord.Interaction):
+    u_id = str(interaction.user.id)
+    pets = load_pets()
+    inv = pets.get(u_id, {}).get("inventory", {})
+
+    embed = discord.Embed(
+        title=f"🎒 ─── TÚI ĐỒ CỦA {interaction.user.display_name.upper()} ─── 🎒",
+        description="Quản lý mồi câu, cần câu và đồ ăn cho Linh Thú của bạn.\n*Chọn vật phẩm bên dưới để sử dụng hoặc cho pet ăn.*",
+        color=discord.Color.blurple()
+    )
+
+    if not inv:
+        embed.add_field(name="Trạng thái", value="Túi đồ của bạn đang trống rỗng. Hãy ghé thăm `/shop` để mua sắm!", inline=False)
+        await interaction.response.send_embed = embed if hasattr(interaction.response, 'send_embed') else await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    desc = ""
+    for item_key, qty in inv.items():
+        if qty <= 0:
+            continue
+        item_info = FISHING_ITEMS.get(item_key) or PET_ITEMS.get(item_key)
+        if item_info:
+            desc += f"• **{item_info['name']}** x`{qty}` — *{item_info.get('desc', '')}*\n"
+
+    embed.add_field(name="📦 Danh Sách Vật Phẩm", value=desc if desc else "Không có vật phẩm nào.", inline=False)
+    view = InventoryView(inv)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 # ==============================================================================
 # --- 8. /NUOITHU (NUÔI THÚ ẢO & MỞ TRỨNG) ---
 # ==============================================================================
