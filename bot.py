@@ -534,12 +534,39 @@ async def bangxephang(interaction: discord.Interaction):
     embed.add_field(name="👑 Đoàn Trưởng Sub Chéo", value=f"{interaction.user.mention} - 1000 Điểm", inline=False)
     await interaction.response.send_message(embed=embed)
 
+ # ==========================================
+# KHỞI CHẠY BOT VÀ KEEPALIVE FOR RENDER
 # ==========================================
-# KHỞI CHẠY BOT
-# ==========================================
+import os
+from flask import Flask
+from threading import Thread
+
+# Web server để Render không ngắt kết nối
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot đang hoạt động 24/7!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# Sự kiện khi bot sẵn sàng
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"🤖 Bot {bot.user} đã sẵn sàng và kết nối thành công!")
 
-# bot.run("YOUR_BOT_TOKEN")
+# Chạy web server giả trước
+keep_alive()
+
+# Lấy token từ Environment Variables đã cài trên Render
+TOKEN = os.getenv("DISCORD_TOKEN")
+if TOKEN:
+    bot.run(TOKEN)
+else:
+    print("❌ LỖI: Chưa cấu hình DISCORD_TOKEN trong Environment Variables!")
