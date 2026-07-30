@@ -1,9 +1,12 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import random
 import asyncio
 from typing import Optional, Dict, Any
+import os
+from flask import Flask
+from threading import Thread
 
 # ==========================================
 # CẤU HÌNH & KHỞI TẠO BOT
@@ -12,23 +15,36 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# Giả lập Database lưu trữ dữ liệu
-ADMIN_IDS = [123456789012345678]  # Thay ID Discord Admin của bạn vào đây
+ADMIN_IDS = [123456789012345678] 
 
+# Database lưu trữ
 database = {
-    "users": {},         # {user_id: {"points": 0, "weekly_points": 0, "title": "Tân thủ", "icon": "🔰", "pet": None}}
-    "shops": {
-        "fish": [],      # List các vật phẩm shop cá
-        "pet": []        # List các vật phẩm shop pet
-    },
+    "users": {},
+    "shops": {"fish": [], "pet": []},
     "questions": [
-        {"question": "Con gì chân dài nhất?", "answer": "con đê"}
+        {"question": "Con gì chân dài nhất?", "answer": "con đê"},
+        {"question": "Cái gì càng thâu càng ngắn?", "answer": "điếu thuốc"},
+        {"question": "Nắng ba năm tôi không bỏ bạn, mưa 1 ngày bạn bỏ tôi. Là cái gì?", "answer": "cái bóng"},
+        {"question": "Bệnh gì bác sĩ bó tay?", "answer": "gãy tay"},
+        {"question": "Lịch nào dài nhất?", "answer": "lịch sử"}
     ],
-    "cooldowns": {}      # Quản lý cooldown câu cá
+    "cooldowns": {},
+    "game_channel_id": None  # Lưu ID kênh chơi game
+}
+
+# Biến quản lý trạng thái câu hỏi tự động hiện tại
+current_quiz = {
+    "question": None,
+    "answer": None,
+    "is_active": False
 }
 
 def is_admin(interaction: discord.Interaction) -> bool:
-    return interaction.user.id in ADMIN_IDS
+    if interaction.user.id in ADMIN_IDS:
+        return True
+    if interaction.guild and interaction.user.guild_permissions.administrator:
+        return True
+    return False
 
 def get_user_data(user_id: int):
     if user_id not in database["users"]:
@@ -42,7 +58,97 @@ def get_user_data(user_id: int):
     return database["users"][user_id]
 
 # ==========================================
-# 1. CƠ CHẾ /pvp_pet (XÁC NHẬN & TÍNH TỈ LỆ TẤN CÔNG)
+# HỆ THỐNG ĐỐ VUI TỰ ĐỘNG (1 GIỜ / LẦN - 60S TRẢ LỜI)
+# ==========================================
+
+# 1. Lệnh cài đặt kênh game
+@bot.tree.command(name="set_game_channel", description="Cài đặt kênh xuất hiện câu hỏi đố vui tự động (Admin)")
+async def set_game_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_admin(interaction):
+        await interaction.response.send_message("❌ Chỉ có Admin mới được cài đặt kênh game!", ephemeral=True)
+        return
+
+    database["game_channel_id"] = channel.id
+    embed = discord.Embed(
+        title="⚙️ CÀI ĐẶT KÊNH GAME THÀNH CÔNG",
+        description=f"✅ Từ bây giờ, các câu hỏi đố vui tự động sẽ xuất hiện tại kênh: {channel.mention}\n⏰ Tần suất: **1 giờ / lần** (Có **60 giây** để trả lời).",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed)
+
+# 2. Vòng lặp tự động tạo câu hỏi mỗi 1 giờ
+@tasks.loop(hours=1)
+async def auto_quiz_task():
+    channel_id = database["game_channel_id"]
+    if not channel_id or not database["questions"]:
+        return
+
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        return
+
+    # Chọn ngẫu nhiên 1 câu hỏi
+    quiz = random.choice(database["questions"])
+    current_quiz["question"] = quiz["question"]
+    current_quiz["answer"] = quiz["answer"].lower().strip()
+    current_quiz["is_active"] = True
+
+    embed = discord.Embed(
+        title="🧠 CÂU HỎI ĐỐ VUI TỰ ĐỘNG 🧠",
+        description=f"❓ **{current_quiz['question']}**\n\n⏳ Bạn có **60 giây** để nhập câu trả lời trực tiếp vào kênh này!",
+        color=discord.Color.gold()
+    )
+    embed.set_footer(text="🎁 Trả lời đúng nhận ngẫu nhiên từ 1 đến 100 điểm!")
+    await channel.send(embed=embed)
+
+    # Chờ 60 giây
+    await asyncio.sleep(60)
+
+    # Nếu sau 60 giây vẫn chưa ai trả lời đúng
+    if current_quiz["is_active"]:
+        current_quiz["is_active"] = False
+        timeout_embed = discord.Embed(
+            title="⏰ HẾT GIỜ TRẢ LỜI!",
+            description=f"Chưa có ai đưa ra câu trả lời chính xác.\n💡 Đáp án đúng là: **{current_quiz['answer']}**",
+            color=discord.Color.red()
+        )
+        await channel.send(embed=timeout_embed)
+
+# 3. Bắt tin nhắn trả lời của người chơi
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+
+    # Chỉ kiểm tra nếu đúng kênh game và đang trong thời gian trả lời
+    if database["game_channel_id"] and message.channel.id == database["game_channel_id"]:
+        if current_quiz["is_active"]:
+            user_answer = message.content.lower().strip()
+            
+            # Nếu người chơi đoán ĐÚNG
+            if user_answer == current_quiz["answer"]:
+                current_quiz["is_active"] = False  # Đóng câu hỏi lập tức
+                
+                # Thưởng điểm ngẫu nhiên 1 - 100
+                reward_points = random.randint(1, 100)
+                u_data = get_user_data(message.author.id)
+                u_data["points"] += reward_points
+                u_data["weekly_points"] += reward_points
+
+                win_embed = discord.Embed(
+                    title="🎉 CHÚC MỪNG BẠN ĐÃ TRẢ LỜI ĐÚNG! 🎉",
+                    description=f"CHÍNH XÁC! {message.author.mention} đã trả lời đúng đáp án **{current_quiz['answer']}**!\n🎁 Bạn nhận được **+{reward_points} Điểm** thưởng.",
+                    color=discord.Color.green()
+                )
+                await message.channel.send(embed=win_embed)
+                return
+            
+            # Nếu đoán SAI: Bot hoàn toàn giữ im lặng (không gửi tin nhắn) để tránh làm rác kênh chat!
+
+    await bot.process_commands(message)
+
+# ==========================================
+# 1. CƠ CHẾ /pvp_pet
 # ==========================================
 class PetPVPConfirmView(discord.ui.View):
     def __init__(self, challenger: discord.Member, opponent: discord.Member):
@@ -67,7 +173,6 @@ class PetPVPConfirmView(discord.ui.View):
         power2 = p2_data["power"]
         diff = abs(power1 - power2)
 
-        # Tính tỉ lệ thắng thua
         if power1 == power2:
             win_rate_p1 = 0.50
         elif power1 > power2:
@@ -75,29 +180,26 @@ class PetPVPConfirmView(discord.ui.View):
                 win_rate_p1 = 0.60
             elif 1000 < diff <= 2000:
                 win_rate_p1 = 0.70
-            else: # > 2000
+            else:
                 win_rate_p1 = 1.00
-        else: # power1 < power2
+        else:
             if 10 <= diff <= 1000:
                 win_rate_p1 = 0.40
             elif 1000 < diff <= 2000:
                 win_rate_p1 = 0.30
-            else: # > 2000
+            else:
                 win_rate_p1 = 0.00
 
-        # Tiến hành PVP
         winner = self.challenger if random.random() < win_rate_p1 else self.opponent
-        loser = self.opponent if winner == self.challenger else self.challenger
 
         embed = discord.Embed(
-            title="⚔️ TỔNG KẾT TRẬN ĐẤU PET THỜI LƯỢNG CAO ⚔️",
+            title="⚔️ TỔNG KẾT TRẬN ĐẤU PET ⚔️",
             color=discord.Color.gold()
         )
         embed.add_field(name=f"🎮 {self.challenger.display_name}", value=f"🐾 Pet: **{p1_data['name']}**\n⚡ Lực chiến: **{power1}**", inline=True)
         embed.add_field(name=f"🎮 {self.opponent.display_name}", value=f"🐾 Pet: **{p2_data['name']}**\n⚡ Lực chiến: **{power2}**", inline=True)
         embed.add_field(name="🏆 KẾT QUẢ CHÍNH THỨC", value=f"🎉 **{winner.mention}** đã giành chiến thắng thuyết phục!", inline=False)
         
-        # Disable nút sau khi xong
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(content="💥 **TRẬN ĐẤU ĐÃ BẮT ĐẦU!**", embed=embed, view=self)
@@ -125,26 +227,18 @@ async def pvp_pet(interaction: discord.Interaction, opponent: discord.Member):
     await interaction.response.send_message(content=opponent.mention, embed=embed, view=view)
 
 # ==========================================
-# 2. HỆ THỐNG SHOP DÙNG CHUNG UNLIMITED TIMEOUT (/shop)
+# 2. HỆ THỐNG SHOP (/shop)
 # ==========================================
 class AddItemModal(discord.ui.Modal):
     def __init__(self, shop_type: str):
         super().__init__(title=f"➕ Thêm Vật Phẩm Vào Shop {shop_type.upper()}")
         self.shop_type = shop_type
 
-        self.item_name = discord.ui.TextInput(label="Tên vật phẩm", placeholder="VD: Trái Đột Biến / Mồi Cầu Vồng")
+        self.item_name = discord.ui.TextInput(label="Tên vật phẩm", placeholder="VD: Trái Đột Biến")
         self.price = discord.ui.TextInput(label="Giá bán (Điểm)", placeholder="VD: 500")
         self.rarity = discord.ui.TextInput(label="Độ hiếm", placeholder="Thường / Hiếm / Thần Thoại")
-        self.buff_type = discord.ui.TextInput(
-            label="Loại Buff (Ghi chính xác)", 
-            placeholder="Pet: power_up / exp_up | Cá: success_rate / rare_rate",
-            required=False
-        )
-        self.buff_value = discord.ui.TextInput(
-            label="Giá trị Buff (Chỉ số số)", 
-            placeholder="VD: 50 (Có thể để trống)", 
-            required=False
-        )
+        self.buff_type = discord.ui.TextInput(label="Loại Buff", placeholder="power_up / exp_up", required=False)
+        self.buff_value = discord.ui.TextInput(label="Giá trị Buff", placeholder="VD: 50", required=False)
 
         self.add_item(self.item_name)
         self.add_item(self.price)
@@ -164,9 +258,9 @@ class AddItemModal(discord.ui.Modal):
                 "buff_value": val
             }
             database["shops"][self.shop_type].append(new_item)
-            await interaction.response.send_message(f"✅ Đã thêm thành công **{new_item['name']}** vào Shop **{self.shop_type.upper()}**!", ephemeral=True)
+            await interaction.response.send_message(f"✅ Đã thêm **{new_item['name']}** vào Shop!", ephemeral=True)
         except ValueError:
-            await interaction.response.send_message("❌ Giá hoặc Giá trị Buff phải là chữ số hợp lệ!", ephemeral=True)
+            await interaction.response.send_message("❌ Giá trị nhập vào không hợp lệ!", ephemeral=True)
 
 class BuySelectView(discord.ui.View):
     def __init__(self, shop_type: str, user_id: int):
@@ -174,7 +268,6 @@ class BuySelectView(discord.ui.View):
         self.shop_type = shop_type
         self.user_id = user_id
         
-        # Thêm Select menu mua sắm
         items = database["shops"][shop_type]
         options = []
         for item in items:
@@ -187,7 +280,7 @@ class BuySelectView(discord.ui.View):
             ))
         
         if options:
-            select = discord.ui.Select(placeholder="🛒 Chọn vật phẩm muốn mua...", options=options)
+            select = discord.ui.Select(placeholder="🛒 Chọn vật phẩm...", options=options)
             select.callback = self.buy_callback
             self.add_item(select)
 
@@ -200,36 +293,29 @@ class BuySelectView(discord.ui.View):
         item = next((i for i in database["shops"][self.shop_type] if i["id"] == item_id), None)
         u_data = get_user_data(interaction.user.id)
 
-        if not item:
-            await interaction.response.send_message("❌ Vật phẩm không tồn tại!", ephemeral=True)
+        if not item or u_data["points"] < item["price"]:
+            await interaction.response.send_message("❌ Không thể mua vật phẩm này!", ephemeral=True)
             return
 
-        if u_data["points"] < item["price"]:
-            await interaction.response.send_message("❌ Bạn không có đủ Điểm để mua vật phẩm này!", ephemeral=True)
-            return
-
-        # Trừ tiền & Áp dụng hiệu ứng
         u_data["points"] -= item["price"]
-        
-        # Xử lý Buff tác dụng
         effect_msg = ""
         if item["buff_type"] == "power_up" and u_data["pet"]:
             u_data["pet"]["power"] += int(item["buff_value"])
-            effect_msg = f"\n⚡ Lực chiến Pet tăng thêm +{item['buff_value']}!"
+            effect_msg = f"\n⚡ Pet +{item['buff_value']} Lực chiến!"
         elif item["buff_type"] == "exp_up" and u_data["pet"]:
             u_data["pet"]["exp"] += int(item["buff_value"])
-            effect_msg = f"\n🌟 Pet nhận thêm +{item['buff_value']} EXP!"
+            effect_msg = f"\n🌟 Pet +{item['buff_value']} EXP!"
 
         embed = discord.Embed(
             title="🎉 MUA HÀNG THÀNH CÔNG 🎉",
-            description=f"Bạn đã mua thành công **{item['name']}**!\n💰 Số dư còn lại: **{u_data['points']} Điểm**{effect_msg}",
+            description=f"Đã mua **{item['name']}**!\n💰 Số dư: **{u_data['points']} Điểm**{effect_msg}",
             color=discord.Color.green()
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class ShopMainView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None) # Timeout=None theo yêu cầu
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="Cửa Hàng Cá 🎣", style=discord.ButtonStyle.primary, custom_id="shop_fish_btn")
     async def fish_shop(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -242,58 +328,42 @@ class ShopMainView(discord.ui.View):
     @discord.ui.button(label="Thêm Vật Phẩm (Admin) ➕", style=discord.ButtonStyle.danger, custom_id="shop_add_btn")
     async def add_item_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_admin(interaction):
-            await interaction.response.send_message("❌ Chỉ có Admin mới được sử dụng nút này!", ephemeral=True)
+            await interaction.response.send_message("❌ Chỉ có Admin mới dùng được!", ephemeral=True)
             return
         
         view = discord.ui.View()
-        btn_fish = discord.ui.Button(label="Thêm vào Shop Cá 🎣", style=discord.ButtonStyle.primary)
-        btn_pet = discord.ui.Button(label="Thêm vào Shop Pet 🐾", style=discord.ButtonStyle.success)
+        btn_fish = discord.ui.Button(label="Shop Cá 🎣", style=discord.ButtonStyle.primary)
+        btn_pet = discord.ui.Button(label="Shop Pet 🐾", style=discord.ButtonStyle.success)
 
-        async def cb_fish(i):
-            await i.response.send_modal(AddItemModal("fish"))
-        async def cb_pet(i):
-            await i.response.send_modal(AddItemModal("pet"))
+        async def cb_fish(i): await i.response.send_modal(AddItemModal("fish"))
+        async def cb_pet(i): await i.response.send_modal(AddItemModal("pet"))
 
         btn_fish.callback = cb_fish
         btn_pet.callback = cb_pet
         view.add_item(btn_fish)
         view.add_item(btn_pet)
 
-        await interaction.response.send_message("🛠️ Chọn cửa hàng bạn muốn thêm vật phẩm mới:", view=view, ephemeral=True)
+        await interaction.response.send_message("🛠️ Chọn shop muốn thêm:", view=view, ephemeral=True)
 
     async def display_shop(self, interaction: discord.Interaction, shop_type: str):
         items = database["shops"][shop_type]
-        embed = discord.Embed(
-            title=f"🏪 CỬA HÀNG {shop_type.upper()} CAO CẤP 🏪",
-            description="Danh sách các mặt hàng đang bày bán:",
-            color=discord.Color.teal()
-        )
+        embed = discord.Embed(title=f"🏪 CỬA HÀNG {shop_type.upper()}", color=discord.Color.teal())
         if not items:
-            embed.description = "🕸️ Cửa hàng hiện tại đang trống!"
+            embed.description = "🕸️ Shop hiện tại đang trống!"
         else:
             for item in items:
-                buff_info = f"\n✨ Buff: `{item['buff_type']}` (+{item['buff_value']})" if item['buff_type'] != "None" else ""
-                embed.add_field(
-                    name=f"📦 {item['name']} [{item['rarity']}]",
-                    value=f"💵 Giá: **{item['price']} Điểm**{buff_info}",
-                    inline=False
-                )
+                embed.add_field(name=f"📦 {item['name']} [{item['rarity']}]", value=f"💵 Giá: **{item['price']} Điểm**", inline=False)
 
         view = BuySelectView(shop_type, interaction.user.id) if items else None
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 @bot.tree.command(name="shop", description="Mở cửa hàng trung tâm")
 async def shop(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="✨ HỆ THỐNG CỬA HÀNG TRUNG TÂM ✨",
-        description="Chào mừng bạn đến với Cửa Hàng! Vui lòng chọn danh mục bên dưới để khám phá và mua sắm.",
-        color=discord.Color.blurple()
-    )
-    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/3081/3081559.png")
+    embed = discord.Embed(title="✨ HỆ THỐNG CỬA HÀNG TRUNG TÂM ✨", color=discord.Color.blurple())
     await interaction.response.send_message(embed=embed, view=ShopMainView())
 
 # ==========================================
-# 3. /nuoithu (CÓ NÚT CHO ĂN 100 EXP GIÁ 500 ĐIỂM & NÚT THÊM PET ADMIN)
+# 3. /nuoithu
 # ==========================================
 class AddPetModal(discord.ui.Modal):
     def __init__(self):
@@ -305,13 +375,8 @@ class AddPetModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         u_data = get_user_data(interaction.user.id)
-        u_data["pet"] = {
-            "name": self.pet_name.value,
-            "power": int(self.base_power.value),
-            "exp": 0,
-            "level": 1
-        }
-        await interaction.response.send_message(f"✅ Đã tạo/thêm Pet **{self.pet_name.value}** thành công!", ephemeral=True)
+        u_data["pet"] = {"name": self.pet_name.value, "power": int(self.base_power.value), "exp": 0, "level": 1}
+        await interaction.response.send_message(f"✅ Đã tạo Pet **{self.pet_name.value}**!", ephemeral=True)
 
 class NuoiThuView(discord.ui.View):
     def __init__(self):
@@ -322,32 +387,27 @@ class NuoiThuView(discord.ui.View):
         u_data = get_user_data(interaction.user.id)
         pet = u_data["pet"]
 
-        if not pet:
-            await interaction.response.send_message("❌ Bạn chưa sở hữu Pet nào!", ephemeral=True)
-            return
-
-        if u_data["points"] < 500:
-            await interaction.response.send_message("❌ Bạn không đủ 500 Điểm để cho Pet ăn!", ephemeral=True)
+        if not pet or u_data["points"] < 500:
+            await interaction.response.send_message("❌ Không đủ điều kiện cho Pet ăn!", ephemeral=True)
             return
 
         u_data["points"] -= 500
         pet["exp"] += 100
         
-        # Thêm logic lên cấp đơn giản
         if pet["exp"] >= 500:
             pet["level"] += 1
             pet["power"] += 50
             pet["exp"] -= 500
-            msg = f"🎉 Pet **{pet['name']}** đã tăng cấp lên **Lv.{pet['level']}** (+50 Lực chiến)!"
+            msg = f"🎉 Pet **{pet['name']}** lên **Lv.{pet['level']}** (+50 Lực chiến)!"
         else:
-            msg = f"🍖 Bạn đã cho **{pet['name']}** ăn thành công! Tăng +100 EXP."
+            msg = f"🍖 **{pet['name']}** đã ăn! Tăng +100 EXP."
 
         await interaction.response.send_message(msg, ephemeral=True)
 
     @discord.ui.button(label="Thêm Pet (Admin) 🐾", style=discord.ButtonStyle.danger)
     async def add_pet_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_admin(interaction):
-            await interaction.response.send_message("❌ Chỉ có Admin mới được dùng nút này!", ephemeral=True)
+            await interaction.response.send_message("❌ Chỉ có Admin mới dùng được!", ephemeral=True)
             return
         await interaction.response.send_modal(AddPetModal())
 
@@ -363,86 +423,50 @@ async def nuoithu(interaction: discord.Interaction):
         embed.add_field(name="⚡ Lực chiến", value=f"**{pet['power']}**", inline=True)
         embed.add_field(name="🌟 EXP", value=f"**{pet['exp']}/500**", inline=True)
     else:
-        embed.description = "❌ Bạn chưa có Pet nào trong trang trại."
+        embed.description = "❌ Bạn chưa có Pet nào."
 
     await interaction.response.send_message(embed=embed, view=NuoiThuView())
 
 # ==========================================
-# 4. /causong (COOLDOWN 5s BẮT BUỘC CHỜ, CÓ TIMEOUT)
+# 4. /causong
 # ==========================================
-class AddFishModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="🎣 Thêm Loại Cá Mới (Admin)")
-        self.fish_name = discord.ui.TextInput(label="Tên cá", placeholder="VD: Cá Rồng Hoàng Kim")
-        self.rarity = discord.ui.TextInput(label="Độ hiếm", placeholder="Thường / Hiếm / Thần Thoại")
-        self.add_item(self.fish_name)
-        self.add_item(self.rarity)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_message(f"✅ Đã thêm cá **{self.fish_name.value}** ({self.rarity.value}) vào hệ thống sông!", ephemeral=True)
-
 class CauSongView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=120) # KHÔNG để Timeout=None
+        super().__init__(timeout=120)
 
     @discord.ui.button(label="Thả Cần Câu Cá 🎣", style=discord.ButtonStyle.primary)
     async def fish_action(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
         now = asyncio.get_event_loop().time()
         
-        # Chống Spam: Cooldown 5s
         if user_id in database["cooldowns"]:
             elapsed = now - database["cooldowns"][user_id]
             if elapsed < 5:
-                await interaction.response.send_message(f"⏳ Vui lòng chờ thêm **{5 - elapsed:.1f}s** để thực hiện lượt câu tiếp theo!", ephemeral=True)
+                await interaction.response.send_message(f"⏳ Chờ **{5 - elapsed:.1f}s** nữa!", ephemeral=True)
                 return
 
         database["cooldowns"][user_id] = now
         await interaction.response.defer()
-        
-        # Đợi 5 giây giả lập cảm giác câu cá thực tế
         await asyncio.sleep(5)
 
-        fishes = ["🐟 Cá Chép (Thường)", "🐠 Cá Hề (Hiếm)", " Cá Rồng (Thần Thoại)", "👞 Giầy Cũ"]
+        fishes = ["🐟 Cá Chép", "🐠 Cá Hề", "🐉 Cá Rồng", "👞 Giầy Cũ"]
         result = random.choice(fishes)
         
         embed = discord.Embed(
             title="🎣 KẾT QUẢ CÂU SÔNG 🎣",
-            description=f"🎉 {interaction.user.mention} đã giật cần và câu được: **{result}**!",
+            description=f"🎉 {interaction.user.mention} câu được: **{result}**!",
             color=discord.Color.blue()
         )
         await interaction.followup.send(embed=embed)
 
-    @discord.ui.button(label="Thêm Cá (Admin) 🐟", style=discord.ButtonStyle.danger)
-    async def add_fish_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not is_admin(interaction):
-            await interaction.response.send_message("❌ Chỉ có Admin mới được mở tính năng này!", ephemeral=True)
-            return
-        await interaction.response.send_modal(AddFishModal())
-
 @bot.tree.command(name="causong", description="Khu vực câu cá bên sông")
 async def causong(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🌊 KHU VỰC CÂU SÔNG THƯ GIÃN 🌊",
-        description="Hãy bấm vào nút **Thả Cần Câu Cá** bên dưới và chờ đợi trong 5 giây!",
-        color=discord.Color.dark_blue()
-    )
+    embed = discord.Embed(title="🌊 KHU VỰC CÂU SÔNG 🌊", description="Bấm **Thả Cần Câu Cá** và chờ 5 giây!", color=discord.Color.dark_blue())
     await interaction.response.send_message(embed=embed, view=CauSongView())
 
 # ==========================================
-# 5. /danhboss (NÚT ĐÁNH BOSS & THÊM BOSS ADMIN)
+# 5. /danhboss
 # ==========================================
-class AddBossModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="👹 Thêm Boss Thế Giới (Admin)")
-        self.boss_name = discord.ui.TextInput(label="Tên Boss", placeholder="VD: Ma Vương Bất Tử")
-        self.boss_hp = discord.ui.TextInput(label="Máu Boss (HP)", placeholder="VD: 50000")
-        self.add_item(self.boss_name)
-        self.add_item(self.boss_hp)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_message(f"✅ Đã triệu hồi Boss **{self.boss_name.value}** (HP: {self.boss_hp.value})!", ephemeral=True)
-
 class BossView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -452,96 +476,51 @@ class BossView(discord.ui.View):
         dmg = random.randint(100, 500)
         embed = discord.Embed(
             title="⚔️ TRẬN CHIẾN BOSS ⚔️",
-            description=f"🔥 **{interaction.user.mention}** đã tung đòn chí mạng gây **{dmg} sát thương** lên Boss!",
+            description=f"🔥 **{interaction.user.mention}** gây **{dmg} sát thương**!",
             color=discord.Color.red()
         )
         await interaction.response.send_message(embed=embed)
 
-    @discord.ui.button(label="Thêm Boss (Admin) 👹", style=discord.ButtonStyle.secondary)
-    async def add_boss_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not is_admin(interaction):
-            await interaction.response.send_message("❌ Chỉ có Admin mới được thực hiện!", ephemeral=True)
-            return
-        await interaction.response.send_modal(AddBossModal())
-
 @bot.tree.command(name="danhboss", description="Khu vực săn Boss thế giới")
 async def danhboss(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="👹 SẢNH CHỜ CHIẾN BOSS 👹",
-        description="Hãy cùng các chiến hữu hợp lực tiêu diệt Boss!",
-        color=discord.Color.dark_red()
-    )
+    embed = discord.Embed(title="👹 SẢNH CHỜ CHIẾN BOSS 👹", color=discord.Color.dark_red())
     await interaction.response.send_message(embed=embed, view=BossView())
 
 # ==========================================
-# 6. BỔ SUNG CÁC LỆNH QUẢN LÝ QUẢN TRỊ VIÊN & HỆ THỐNG
+# 6. QUẢN LÝ ADMIN
 # ==========================================
-
-# /set_top_title
-@bot.tree.command(name="set_top_title", description="Thay đổi icon và tên hiển thị Bảng Xếp Hạng")
-async def set_top_title(interaction: discord.Interaction, top: str, icon: str, title_name: str):
-    if not is_admin(interaction):
-        await interaction.response.send_message("❌ Chỉ có Admin mới dùng được lệnh này!", ephemeral=True)
-        return
-    
-    embed = discord.Embed(
-        title="⚙️ CẬP NHẬT DANH HIỆU BẢNG XẾP HẠNG",
-        description=f"✅ Đã cập nhật cho vị trí **{top}**:\nIcon: {icon}\nDanh hiệu: **{title_name}**",
-        color=discord.Color.gold()
-    )
-    await interaction.response.send_message(embed=embed)
-
-# /point_edit
-@bot.tree.command(name="point_edit", description="Cộng hoặc trừ điểm tuần của thành viên")
-async def point_edit(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not is_admin(interaction):
-        await interaction.response.send_message("❌ Chỉ có Admin mới dùng được lệnh này!", ephemeral=True)
-        return
-
-    u_data = get_user_data(user.id)
-    u_data["weekly_points"] += amount
-    u_data["points"] += amount
-
-    action = "Cộng" if amount >= 0 else "Trừ"
-    embed = discord.Embed(
-        title="💎 THAY ĐỔI ĐIỂM THÀNH VIÊN",
-        description=f"✅ Đã {action} **{abs(amount)}** điểm cho **{user.mention}**.\n📊 Điểm hiện tại: **{u_data['points']}**",
-        color=discord.Color.blue()
-    )
-    await interaction.response.send_message(embed=embed)
-
-# /add_question
-@bot.tree.command(name="add_question", description="Thêm câu hỏi đố vui mẹo mới")
+@bot.tree.command(name="add_question", description="Thêm câu hỏi đố vui mới vào ngân hàng (Admin)")
 async def add_question(interaction: discord.Interaction, question: str, answer: str):
     if not is_admin(interaction):
-        await interaction.response.send_message("❌ Chỉ có Admin mới dùng được lệnh này!", ephemeral=True)
+        await interaction.response.send_message("❌ Chỉ có Admin mới dùng được!", ephemeral=True)
         return
 
     database["questions"].append({"question": question, "answer": answer.lower().strip()})
-    
-    embed = discord.Embed(
-        title="🧠 THÊM CÂU HỎI ĐỐ VUI MỚI",
-        color=discord.Color.purple()
-    )
+    embed = discord.Embed(title="🧠 THÊM CÂU HỎI MỚI THÀNH CÔNG", color=discord.Color.purple())
     embed.add_field(name="❓ Câu hỏi", value=question, inline=False)
     embed.add_field(name="💡 Đáp án", value=f"`{answer}`", inline=False)
     await interaction.response.send_message(embed=embed)
 
-# Bảng xếp hạng minh họa (/bangxephang)
+@bot.tree.command(name="point_edit", description="Cộng/Trừ điểm thành viên (Admin)")
+async def point_edit(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not is_admin(interaction):
+        await interaction.response.send_message("❌ Chỉ có Admin mới dùng được!", ephemeral=True)
+        return
+
+    u_data = get_user_data(user.id)
+    u_data["points"] += amount
+    u_data["weekly_points"] += amount
+    await interaction.response.send_message(f"✅ Đã chỉnh điểm cho {user.mention}. Số dư mới: **{u_data['points']}**")
+
 @bot.tree.command(name="bangxephang", description="Xem bảng xếp hạng")
 async def bangxephang(interaction: discord.Interaction):
     embed = discord.Embed(title="🏆 BẢNG XẾP HẠNG CAO THỦ 🏆", color=discord.Color.gold())
-    embed.add_field(name="👑 Đoàn Trưởng Sub Chéo", value=f"{interaction.user.mention} - 1000 Điểm", inline=False)
+    embed.add_field(name="👑 Hạng 1", value=f"{interaction.user.mention} - 1000 Điểm", inline=False)
     await interaction.response.send_message(embed=embed)
 
- # ==========================================
-# KHỞI CHẠY BOT VÀ KEEPALIVE FOR RENDER
 # ==========================================
-import os
-from flask import Flask
-from threading import Thread
-
-# Web server để Render không ngắt kết nối
+# KHỞI CHẠY BOT & FLASK KEEPALIVE
+# ==========================================
 app = Flask('')
 
 @app.route('/')
@@ -555,18 +534,18 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# Sự kiện khi bot sẵn sàng
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    print(f"🤖 Bot {bot.user} đã sẵn sàng và kết nối thành công!")
+    # Kích hoạt vòng lặp tự động hỏi đố vui 1 tiếng/lần
+    if not auto_quiz_task.is_running():
+        auto_quiz_task.start()
+    print(f"🤖 Bot {bot.user} đã sẵn sàng và kích hoạt tính năng tự động đố vui!")
 
-# Chạy web server giả trước
 keep_alive()
 
-# Lấy token từ Environment Variables đã cài trên Render
 TOKEN = os.getenv("DISCORD_TOKEN")
 if TOKEN:
     bot.run(TOKEN)
 else:
-    print("❌ LỖI: Chưa cấu hình DISCORD_TOKEN trong Environment Variables!")
+    print("❌ LỖI: Chưa cấu hình DISCORD_TOKEN!")
