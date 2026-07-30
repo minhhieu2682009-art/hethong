@@ -879,7 +879,171 @@ async def set_game_channel(interaction: discord.Interaction, channel: discord.Te
     cfg["game_channel_id"] = channel.id
     save_config(cfg)
     await interaction.response.send_message(f"✅ Đã cài đặt kênh Game tại {channel.mention}", ephemeral=True)
+# ==============================================================================
+# --- 9.5. HỆ THỐNG /LEOTHAP (ĐÁNH BOSS VƯỢT THÁP) ---
+# ==============================================================================
+TOWER_BOSS_FILE = "tower_bosses.json"
 
+DEFAULT_TOWER_BOSSES = {
+    "1": {"name": "👾 Quái nhỏ", "pwr": 20, "reward": 100, "title": "Dũng Sĩ Tầng 1", "effect": ""},
+    "2": {"name": "👨🏻‍🐰‍👨🏼 Ma zumbi", "pwr": 40, "reward": 120, "title": "Săn Xác Sống", "effect": ""},
+    "3": {"name": "👺 Chúa quỷ orozon", "pwr": 100, "reward": 200, "title": "Khắc Tinh Orozon", "effect": ""},
+    "4": {"name": "🤖 Romaku", "pwr": 150, "reward": 300, "title": "Kẻ Hủy Diệt Romaku", "effect": ""},
+    "5": {"name": "🫀 Ma ma thần khu", "pwr": 300, "reward": 320, "title": "Trấn Áp Thần Khu", "effect": ""},
+    "6": {"name": "🐲 Leviathan", "pwr": 1000, "reward": 1200, "title": "Sát Long Leviathan", "effect": ""},
+    "7": {"name": "🐙 Kraken vua biển cả", "pwr": 2000, "reward": 3000, "title": "Bá Chủ Đại Dương", "effect": ""},
+    "8": {"name": "🦣 behemonth", "pwr": 3000, "reward": 4000, "title": "Hủy Diệt Behemoth", "effect": ""},
+    "9": {"name": "😈 Quỷ thần Satan", "pwr": 10000, "reward": 6000, "title": "Khất Thực Satan", "effect": ""},
+    "10": {"name": "💀 Adim", "pwr": 900000000, "reward": 1, "title": "Kẻ Thách Thức Thần Linh", "effect": ""}
+}
+
+def load_tower_bosses():
+    return safe_load_json(TOWER_BOSS_FILE, DEFAULT_TOWER_BOSSES)
+
+def save_tower_bosses(data):
+    safe_save_json(TOWER_BOSS_FILE, data)
+
+class AddOrUpdateTowerBossModal(discord.ui.Modal, title="⚙️ Quản Lý Boss Tháp (Admin)"):
+    floor_num = discord.ui.TextInput(label="Số Tầng (1-10 hoặc số mới)", placeholder="Ví dụ: 1", required=True)
+    boss_name = discord.ui.TextInput(label="Tên Boss", placeholder="👾 Chúa Tể Hắc Ám", required=True)
+    boss_pwr = discord.ui.TextInput(label="Lực Chiến Boss (PWR)", placeholder="5000", required=True)
+    boss_reward = discord.ui.TextInput(label="Điểm Thưởng Khi Thắng", placeholder="1500", required=True)
+    boss_effect = discord.ui.TextInput(label="Hiệu Ứng Gây Ra (Không bắt buộc)", placeholder="Gây tê liệt, mất lượt...", required=False)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Chỉ Admin mới có quyền cấu hình Boss!", ephemeral=True)
+            return
+
+        f_key = self.floor_num.value.strip()
+        name = self.boss_name.value.strip()
+        effect = self.boss_effect.value.strip()
+
+        try:
+            pwr = int(self.boss_pwr.value)
+            reward = int(self.boss_reward.value)
+        except ValueError:
+            await interaction.response.send_message("❌ Lực chiến và Điểm thưởng phải là số nguyên!", ephemeral=True)
+            return
+
+        bosses = load_tower_bosses()
+        
+        # Cơ chế ghi đè / thêm mới
+        bosses[f_key] = {
+            "name": name,
+            "pwr": pwr,
+            "reward": reward,
+            "title": f"Chinh Phục Tầng {f_key}",
+            "effect": effect
+        }
+        save_tower_bosses(bosses)
+
+        await interaction.response.send_message(f"✅ Đã cập nhật thành công Boss cho **Tầng {f_key}** (`{name}` - Lực chiến: `{pwr}`)!", ephemeral=True)
+
+class DeleteTowerBossModal(discord.ui.Modal, title="🗑️ Xóa Boss Tháp (Admin)"):
+    floor_num = discord.ui.TextInput(label="Nhập Tầng Cần Xóa Boss", placeholder="Ví dụ: 10", required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Chỉ Admin mới có quyền xóa!", ephemeral=True)
+            return
+        
+        f_key = self.floor_num.value.strip()
+        bosses = load_tower_bosses()
+        if f_key in bosses:
+            del bosses[f_key]
+            save_tower_bosses(bosses)
+            await interaction.response.send_message(f"✅ Đã xóa Boss tại Tầng {f_key} thành công!", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Không tìm thấy Boss ở Tầng {f_key}!", ephemeral=True)
+
+class TowerFloorSelect(discord.ui.Select):
+    def __init__(self):
+        bosses = load_tower_bosses()
+        options = []
+        for floor, b in sorted(bosses.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+            options.append(discord.SelectOption(
+                label=f"Tầng {floor}: {b['name']}",
+                value=str(floor),
+                description=f"Lực chiến yêu cầu: {b['pwr']} | Thưởng: {b['reward']} điểm"
+            ))
+        super().__init__(placeholder="🏰 Chọn tầng tháp muốn khiêu chiến...", min_values=1, max_values=1, options=options[:25])
+
+    async def callback(self, interaction: discord.Interaction):
+        u_id = str(interaction.user.id)
+        pets = load_pets()
+        user_pet_info = pets.get(u_id, {})
+        p_data = user_pet_info.get("pet")
+
+        if not p_data:
+            await interaction.response.send_message("❌ Bạn chưa sở hữu Linh Thú! Hãy dùng `/nuoithu` để mở trứng tham gia chiến đấu.", ephemeral=True)
+            return
+
+        floor_chosen = self.values[0]
+        bosses = load_tower_bosses()
+        boss = bosses.get(floor_chosen)
+
+        if not boss:
+            await interaction.response.send_message("❌ Tầng tháp này không tồn tại hoặc đã bị xóa!", ephemeral=True)
+            return
+
+        pet_pwr = calculate_pet_power(p_data)
+        boss_pwr = boss["pwr"]
+        p_name = get_pet_display_name(p_data)
+
+        embed = discord.Embed(
+            title=f"⚔️ ─── KẾT QUẢ KHIÊU CHIẾN TẦNG {floor_chosen} ─── ⚔️",
+            color=discord.Color.dark_red()
+        )
+
+        embed.add_field(name="🐾 Linh Thú Của Bạn", value=f"{p_name}\nLực chiến: `{pet_pwr} PWR`", inline=True)
+        embed.add_field(name=f"👹 Boss: {boss['name']}", value=f"Lực chiến: `{boss_pwr} PWR`\nHiệu ứng: `{boss['effect'] if boss['effect'] else 'Không có'}`", inline=True)
+
+        # Kiểm tra thắng thua dựa trên lực chiến
+        if pet_pwr >= boss_pwr:
+            reward = boss["reward"]
+            new_score = add_points(u_id, reward)
+            title_to_give = boss.get("title")
+            if title_to_give:
+                add_custom_title(u_id, title_to_give)
+
+            embed.description = f"🎉 **CHIẾN THẮNG VẺ VANG!**\nLinh Thú của bạn đã áp đảo và đánh bại **{boss['name']}** tại Tầng {floor_chosen}!"
+            embed.add_field(name="🎁 Phần Thưởng", value=f"🪙 Nhận được **+{reward} điểm** (Điểm tuần: `{new_score}`)\n👑 Mở khóa danh hiệu: **[{title_to_give}]**", inline=False)
+            embed.color = discord.Color.green()
+        else:
+            embed.description = f"💀 **THẤT BẠI!**\nLực chiến Linh Thú của bạn quá yếu so với **{boss['name']}**. Cần rèn luyện thêm lực chiến qua `/shop` hoặc `/nuoithu`!"
+            embed.color = discord.Color.red()
+
+        await interaction.response.send_message(embed=embed, ephemeral=False)
+
+class TowerView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(TowerFloorSelect())
+
+    @discord.ui.button(label="➕ Update Boss (Admin)", style=discord.ButtonStyle.secondary, custom_id="tower_update_admin_btn", row=1)
+    async def update_boss_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Chỉ Admin mới có quyền cập nhật Boss!", ephemeral=True)
+            return
+        await interaction.response.send_modal(AddOrUpdateTowerBossModal())
+
+    @discord.ui.button(label="🗑️ Xóa Boss (Admin)", style=discord.ButtonStyle.danger, custom_id="tower_delete_admin_btn", row=1)
+    async def delete_boss_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Chỉ Admin mới có quyền xóa Boss!", ephemeral=True)
+            return
+        await interaction.response.send_modal(DeleteTowerBossModal())
+
+@bot.tree.command(name="leothap", description="Mở cổng không gian Tháp Thượng Cổ để khiêu chiến các Boss cực mạnh!")
+async def leothap(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🗼 ─── THÁP THƯỢNG CỔ - ĐÁNH BOSS ─── 🗼",
+        description="Chào mừng các chiến thần đến với Tháp Thượng Cổ.\nHãy chọn tầng bên dưới để đưa Linh Thú vào giao tranh.\n*Lưu ý: Lực chiến Linh Thú của bạn phải lớn hơn hoặc bằng lực chiến của Boss mới có thể chiến thắng!*",
+        color=discord.Color.purple()
+    )
+    embed.set_footer(text="Quản trị viên có thể bấm nút bên dưới để thêm/sửa/xóa Boss theo ý muốn.")
+    await interaction.response.send_message(embed=embed, view=TowerView())
 # ==============================================================================
 # --- 10. CHẠY BOT ---
 # ==============================================================================
