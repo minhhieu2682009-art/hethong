@@ -1044,6 +1044,36 @@ async def leothap(interaction: discord.Interaction):
     )
     embed.set_footer(text="Quản trị viên có thể bấm nút bên dưới để thêm/sửa/xóa Boss theo ý muốn.")
     await interaction.response.send_message(embed=embed, view=TowerView())
+    # ==============================================================================
+# --- 11. /POINT_EDIT (QUẢN TRỊ VIÊN CỘNG/TRỪ ĐIỂM THÀNH VIÊN) ---
+# ==============================================================================
+@bot.tree.command(name="point_edit", description="[Admin] Cộng hoặc trừ điểm của một thành viên trong server.")
+@app_commands.default_permissions(administrator=True)
+async def point_edit(interaction: discord.Interaction, user: discord.Member, amount: int):
+    # Kiểm tra lại quyền Admin chắc chắn
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Bạn không có quyền quản trị viên để sử dụng lệnh này!", ephemeral=True)
+        return
+
+    u_id = str(user.id)
+    
+    # Thực hiện cộng hoặc trừ điểm (hàm add_points đã tự xử lý logic giới hạn không âm hoặc cộng trừ)
+    new_score = add_points(u_id, amount)
+    
+    # Tạo thông báo phản hồi phù hợp
+    if amount >= 0:
+        msg = f"✅ Đã **cộng thêm `+{amount}` điểm** cho {user.mention}. Tổng điểm tuần hiện tại: `{new_score}`."
+    else:
+        msg = f"⚠️ Đã **trừ `{amount}` điểm** của {user.mention}. Tổng điểm tuần hiện tại: `{new_score}`."
+
+    embed = discord.Embed(
+        title="🛠️ ─── QUẢN LÝ ĐIỂM THÀNH VIÊN (ADMIN) ─── 🛠️",
+        description=msg,
+        color=discord.Color.orange()
+    )
+    embed.set_footer(text=f"Thực hiện bởi Admin: {interaction.user.display_name}")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 # ==============================================================================
 # --- 10. CHẠY BOT ---
 # ==============================================================================
