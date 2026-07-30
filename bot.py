@@ -931,12 +931,13 @@ async def taixiu(interaction: discord.Interaction, luachon: str, tiencuoc: int):
     win = (choice in ["tài", "tai"] and result == "Tài") or (choice in ["xỉu", "xiu"] and result == "Xỉu")
 
     if win:
-        new_pts = add_points(u_id, tiencuoc)
-        await interaction.response.send_message(f"🎲 Xúc xắc: `{d1}` - `{d2}` - `{d3}` => **{total} ({result})**\n🎉 Chúc mừng bạn đã THẮNG **+{tiencuoc} điểm** (Tổng: `{new_pts}`).")
+        # Thắng nhận gấp đôi tiền cược (+ tiencuoc * 2)
+        new_pts = add_points(u_id, tiencuoc * 2)
+        await interaction.response.send_message(f"🎲 Xúc xắc: `{d1}` - `{d2}` - `{d3}` => **{total} ({result})**\n🎉 Chúc mừng bạn đã THẮNG gấp đôi **+{tiencuoc * 2} điểm** (Tổng: `{new_pts}`).")
     else:
-        new_pts = add_points(u_id, -tiencuoc)
-        await interaction.response.send_message(f"🎲 Xúc xắc: `{d1}` - `{d2}` - `{d3}` => **{total} ({result})**\n😭 Bạn đã THUA **-{tiencuoc} điểm** (Tổng: `{new_pts}`).")
-
+        # Thua trừ gấp đôi tiền cược (- tiencuoc * 2)
+        new_pts = add_points(u_id, -(tiencuoc * 2))
+        await interaction.response.send_message(f"🎲 Xúc xắc: `{d1}` - `{d2}` - `{d3}` => **{total} ({result})**\n😭 Bạn đã THUA gấp đôi **-{tiencuoc * 2} điểm** (Tổng: `{new_pts}`).")
 @bot.tree.command(name="bangxephang", description="Xem Bảng Xếp Hạng Điểm Cống Hiến!")
 async def bangxephang(interaction: discord.Interaction):
     data = load_data()
