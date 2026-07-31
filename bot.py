@@ -458,8 +458,7 @@ class AddShopItemModal(discord.ui.Modal, title="➕ Thêm Vật Phẩm Shop (Adm
     item_id = discord.ui.TextInput(label="ID Vật Phẩm", placeholder="can_kc", required=True)
     item_name = discord.ui.TextInput(label="Tên & Icon Vật Phẩm", placeholder="💎 Cần Kim Cương", required=True)
     item_price = discord.ui.TextInput(label="Giá Điểm", placeholder="1000", required=True)
-    item_buff1 = discord.ui.TextInput(label="Buff 1 (% Câu/Cá Hiếm/EXP/PWR)", placeholder="0.15", required=False)
-    item_buff2 = discord.ui.TextInput(label="Buff 2 (Thời hạn min / 0=vĩnh viễn)", placeholder="600", required=False)
+    item_buffs = discord.ui.TextInput(label="Thông số Buff (cách nhau dấu phẩy)", placeholder="0.15, 600 (hoặc 0)", required=False)
 
     async def on_submit(self, interaction: discord.Interaction):
         if not interaction.user.guild_permissions.administrator:
@@ -469,13 +468,34 @@ class AddShopItemModal(discord.ui.Modal, title="➕ Thêm Vật Phẩm Shop (Adm
         target = self.shop_target.value.strip().lower()
         i_id = self.item_id.value.strip()
         name = self.item_name.value.strip()
+        
         try:
             price = int(self.item_price.value)
-            b1 = float(self.item_buff1.value) if self.item_buff1.value else 0.0
-            b2 = int(self.item_buff2.value) if self.item_buff2.value else 0
+            raw_buffs = self.item_buffs.value.strip()
+            if raw_buffs:
+                parts = [p.strip() for p in raw_buffs.split(",")]
+                b1 = float(parts[0]) if len(parts) > 0 and parts[0] else 0.0
+                b2 = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+            else:
+                b1, b2 = 0.0, 0
         except:
-            await interaction.response.send_message("❌ Giá hoặc chỉ số buff không hợp lệ!", ephemeral=True)
+            await interaction.response.send_message("❌ Giá hoặc định dạng buff không hợp lệ! (Ví dụ: 0.15, 600)", ephemeral=True)
             return
+
+        if target == "fishing":
+            FISHING_ITEMS[i_id] = {
+                "name": name, "type": "can", "rarity": "Đặc Biệt",
+                "price": price, "succ_bonus": b1, "desc": f"Vật phẩm câu cá đặc biệt (Buff: {b1})"
+            }
+            safe_save_json(FISHING_ITEMS_FILE, FISHING_ITEMS)
+        else:
+            PET_ITEMS[i_id] = {
+                "name": name, "price": price, "buff_pwr": int(b1),
+                "duration": b2, "add_exp": int(b1), "desc": f"Đồ pet đặc biệt (Buff: {b1})"
+            }
+            safe_save_json(PET_ITEMS_FILE, PET_ITEMS)
+
+        await interaction.response.send_message(f"✅ Đã thêm thành công vật phẩm **{name}** vào Shop `{target}`!", ephemeral=True)
 
         if target == "fishing":
             FISHING_ITEMS[i_id] = {
