@@ -1,4 +1,5 @@
 import asyncio
+from zoneinfo import ZoneInfo
 from datetime import datetime, time, timezone
 import os
 import random
@@ -982,7 +983,175 @@ async def pvp_fruit(interaction: discord.Interaction, đối_thủ: discord.Memb
   await interaction.response.send_message(
       content=đối_thủ.mention, embed=embed, view=view
   )
+import asyncio
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
+# Múi giờ Việt Nam để đảm bảo 6h sáng chạy chính xác
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+# --- 1. CƠ CHẾ KIẾM ĐIỂM QUA CHAT & VOICE (CÓ CHỐNG SPAM) ---
+# Từ điển lưu thời điểm chat gần nhất của mỗi user để chống spam điểm
+chat_cooldowns = {}
+
+@client.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    
+    user_id = message.author.id
+    now = datetime.now()
+    
+    # Chống spam: Mỗi user phải cách nhau ít nhất 5 giây mới được tính điểm chat tiếp theo
+    if user_id in chat_cooldowns:
+        if (now - chat_cooldowns[user_id]).total_seconds() < 5:
+            await client.process_commands(message)
+            return
+            
+    chat_cooldowns[user_id] = now
+    
+    # Cộng điểm chat
+    p = get_player(user_id)
+    p["points"] += 15
+    await save_player_async(user_id, p)
+    
+    await client.process_commands(message)
+
+# Vòng lặp cộng điểm Voice (cứ mỗi phút ở trong kênh thoại nhận 20 điểm)
+async def voice_point_loop():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        await asyncio.sleep(60)
+        for guild in client.guilds:
+            for member in guild.members:
+                if member.voice and member.voice.channel and not member.bot:
+                    p = get_player(member.id)
+                    p["points"] += 20
+                    await save_player_async(member.id, p)
+
+# Khởi chạy các vòng lặp ngầm khi bot online
+@client.event
+async def on_ready():
+    print(f"Bot đã đăng nhập thành công với tên {client.user}")
+    if not hasattr(client, "bg_tasks_started"):
+        client.loop.create_task(voice_point_loop())
+        client.loop.create_task(daily_leaderboard_task())
+        client.loop.create_task(weekly_reset_task())
+        client.bg_tasks_started = True
+
+
+# --- 2. CẤU HÌNH DANH HIỆU TOP (ADMIN CÓ THỂ ĐỔI) ---
+TOP_CONFIG = {
+    1: {"title": "Khư Quỷ", "color": 0xE74C3C},   # Top 1: Đỏ
+    2: {"title": "Khu La", "color": 0x3498DB},    # Top 2: Xanh dương
+    3: {"title": "Thế Thần", "color": 0xF1C40F}   # Top 3: Vàng
+}
+
+@client.tree.command(name="set_top_title", description="[Admin] Thay đổi tên danh hiệu và màu sắc cho Top 1, 2, 3")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_top_title(interaction: discord.Interaction, rank: int, title: str, color_hex: str):
+    if rank not in [1, 2, 3]:
+        await interaction.response.send_message("❌ Chỉ có thể cấu hình cho Top 1, 2 hoặc 3!", ephemeral=True)
+        return
+    
+    try:
+        color_int = int(color_hex.replace("#", ""), 16)
+    except ValueError:
+        await interaction.response.send_message("❌ Mã màu không hợp lệ! Hãy dùng dạng HEX (Ví dụ: E74C3C)", ephemeral=True)
+        return
+    
+    TOP_CONFIG[rank]["title"] = title
+    TOP_CONFIG[rank]["color"] = color_int
+    
+    await interaction.response.send_message(f"✅ Đã cập nhật thành công danh hiệu **Top {rank}** thành `[{title}]`!", ephemeral=True)
+
+
+# --- 3. LỆNH /bangxephang VÀ TỰ ĐỘNG CẬP NHẬT KÊNH ---
+active_lb_channels = set()
+
+def generate_leaderboard_embed():
+    all_players = []
+    # Đảm bảo biến `db` khớp với từ điển lưu trữ dữ liệu người chơi của bot bạn
+    for uid, data in db.items():
+        all_players.append((int(uid), data.get("points", 0)))
+    
+    all_players.sort(key=lambda x: x[1], reverse=True)
+    top_10 = all_players[:10]
+
+    embed = discord.Embed(
+        title="🏆 ─── BẢNG XẾP HẠNG ĐẠI HẢI TRÌNH ─── 🏆",
+        description="Hệ thống cập nhật tự động hàng ngày lúc **06:00 sáng** và trao giải vào **cuối tuần**!",
+        color=0xF39C12
+    )
+
+    desc_list = []
+    for index, (uid, pts) in enumerate(top_10, start=1):
+        medal = "👑" if index == 1 else "🥈" if index == 2 else "🥉" if index == 3 else f"`#{index}`"
+        
+        title_display = ""
+        if index in TOP_CONFIG:
+            title_display = f" | 🏷️ **{TOP_CONFIG[index]['title']}**"
+
+        desc_list.append(f"{medal} <@{uid}> — **{pts:,} điểm**{title_display}")
+
+    embed.add_field(name="Top Cao Thủ", value="\n".join(desc_list) if desc_list else "Chưa có dữ liệu xếp hạng.", inline=False)
+    return embed
+
+@client.tree.command(name="bangxephang", description="Xem bảng xếp hạng điểm số toàn server")
+async def bangxephang(interaction: discord.Interaction):
+    active_lb_channels.add(interaction.channel_id)
+    embed = generate_leaderboard_embed()
+    await interaction.response.send_message(embed=embed)
+
+
+# --- 4. TỰ ĐỘNG CẬP NHẬT LÚC 6H SÁNG (GIỜ VN) & RESET CUỐI TUẦN ---
+async def daily_leaderboard_task():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        now = datetime.now(VN_TZ)
+        target_time = datetime.combine(now.date(), time(6, 0), tzinfo=VN_TZ)
+        if now >= target_time:
+            target_time += timedelta(days=1)
+        
+        seconds_to_wait = (target_time - now).total_seconds()
+        await asyncio.sleep(seconds_to_wait)
+        
+        embed = generate_leaderboard_embed()
+        for channel_id in list(active_lb_channels):
+            try:
+                channel = client.get_channel(channel_id)
+                if channel:
+                    await channel.send("⏰ **Bảng xếp hạng đã được cập nhật tự động lúc 06:00 sáng!**", embed=embed)
+            except Exception:
+                pass
+
+async def weekly_reset_task():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        now = datetime.now(VN_TZ)
+        # Kiểm tra nếu là Chủ Nhật hàng tuần
+        if now.weekday() == 6:
+            all_players = sorted([(uid, data.get("points", 0)) for uid, data in db.items()], key=lambda x: x[1], reverse=True)
+            if len(all_players) >= 1:
+                for rank_idx, (uid, pts) in enumerate(all_players[:3], start=1):
+                    p = get_player(int(uid))
+                    earned_title = TOP_CONFIG[rank_idx]["title"]
+                    if earned_title not in p["titles"]:
+                        p["titles"].append(earned_title)
+                    p["equipped_title"] = earned_title
+                    await save_player_async(int(uid), p)
+                
+                # Gửi thông báo tổng kết cuối tuần vào các kênh đang mở bảng xếp hạng
+                for channel_id in list(active_lb_channels):
+                    try:
+                        channel = client.get_channel(channel_id)
+                        if channel:
+                            await channel.send("🎉 **Hệ thống đã tổng kết BXH cuối tuần và trao danh hiệu độc quyền cho Top 3 thành công!**")
+                    except Exception:
+                        pass
+        
+        # Chờ 24 tiếng sau kiểm tra lại
+        await asyncio.sleep(86400)
 # --- KHỞI ĐỘNG BOT VÀ GIỮ SỐNG 24/7 ---
 if __name__ == "__main__":
   keep_alive()
