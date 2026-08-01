@@ -616,7 +616,301 @@ async def tuido(interaction: discord.Interaction):
   embed.add_field(name="📜 Danh hiệu đã sở hữu", value=", ".join(p["titles"]) or "Chưa có", inline=False)
 
   await interaction.response.send_message(embed=embed, ephemeral=True)
+# ==========================================
+# HỆ THỐNG BLOX FRUITS HOÀN CHỈNH (CHUẨN ĐIỂM)
+# ==========================================
 
+import random
+import discord
+
+# Dữ liệu chuẩn các loại Trái Ác Quỷ (Độ hiếm, Giá trị, Kỹ năng thức tỉnh)
+BLOXL_FRUITS_DATABASE = {
+    "Rocket": {
+        "type": "Thường (Common)",
+        "price": 5000,
+        "desc": "Tên lửa tầm trung, dễ kiếm cho tân thủ.",
+        "skill": "Phóng tên lửa định hướng",
+    },
+    "Spin": {
+        "type": "Thường (Common)",
+        "price": 7500,
+        "desc": "Xoay vòng tròn né tránh sát thương.",
+        "skill": "Cơn lốc xoáy phi thân",
+    },
+    "Flame": {
+        "type": "Nguyên tố (Elemental)",
+        "price": 250000,
+        "desc": "Hỏa quyền thiêu đốt mọi mục tiêu.",
+        "skill": "Đại hồng liên hỏa diệm",
+    },
+    "Ice": {
+        "type": "Nguyên tố (Elemental)",
+        "price": 350000,
+        "desc": "Đóng băng diện rộng, kiểm soát kẻ địch.",
+        "skill": "Kỷ băng hà vĩnh cửu",
+    },
+    "Light": {
+        "type": "Nguyên tố (Elemental)",
+        "price": 650000,
+        "desc": "Tốc độ ánh sáng, đâm xuyên kẻ thù.",
+        "skill": "Kiếm quang chiếu rọi",
+    },
+    "Magma": {
+        "type": "Nguyên tố (Elemental)",
+        "price": 850000,
+        "desc": "Gây sát thương hệ dung nham cực kỳ lớn.",
+        "skill": "Mưa hỏa sơn hủy diệt",
+    },
+    "Buddha": {
+        "type": "Thú vật (Beast)",
+        "price": 1200000,
+        "desc": "Hóa thân Phật Tổ tăng cực nhiều giáp và tầm đánh.",
+        "skill": "Kim thân bất tử",
+    },
+    "Portal": {
+        "type": "Đặc biệt (Special)",
+        "price": 1900000,
+        "desc": "Dịch chuyển tức thời qua không gian.",
+        "skill": "Cổng không gian chiều thứ V",
+    },
+    "Dough": {
+        "type": "Huyền thoại (Legendary)",
+        "price": 2800000,
+        "desc": "Sức mạnh bột nhào thức tỉnh tối thượng (Awakened).",
+        "skill": "Mưa bánh rán xuyên giáp",
+    },
+    "Leopard": {
+        "type": "Huyền thoại (Legendary)",
+        "price": 5000000,
+        "desc": "Hóa báo đốm với tốc độ di chuyển và combo vô địch.",
+        "skill": "Móng vuốt báo xé gió",
+    },
+    "Dragon": {
+        "type": "Huyền thoại (Legendary)",
+        "price": 3500000,
+        "desc": "Hóa Rồng thiêu rụi toàn bộ chiến trường Sea.",
+        "skill": "Hơi thở rồng tận thế",
+    },
+}
+
+
+class BloxFruitGachaView(discord.ui.View):
+
+  def __init__(self):
+    super().__init__(timeout=None)
+
+  @discord.ui.button(
+      label="🎰 Roll Trái Ác Quỷ (50k Điểm)",
+      style=discord.ButtonStyle.success,
+      emoji="🍈",
+      custom_id="bf_roll_btn_v3",
+  )
+  async def roll_fruit(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    p = get_player(interaction.user.id)
+    cost = 50000
+
+    if p["points"] < cost:
+      await interaction.response.send_message(
+          f"❌ Bạn không đủ điểm! Cần ít nhất `{cost:,} điểm` để roll.",
+          ephemeral=True,
+      )
+      return
+
+    p["points"] -= cost
+
+    fruits = list(BLOXL_FRUITS_DATABASE.keys())
+    weights = [30, 25, 15, 12, 8, 5, 3, 1.5, 0.4, 0.1, 1.0]
+    chosen_fruit = random.choices(fruits, weights=weights, k=1)[0]
+    f_info = BLOXL_FRUITS_DATABASE[chosen_fruit]
+
+    if "fruits" not in p["inventory"]:
+      p["inventory"]["fruits"] = {}
+    p["inventory"]["fruits"][chosen_fruit] = (
+        p["inventory"]["fruits"].get(chosen_fruit, 0) + 1
+    )
+
+    await save_player_async(interaction.user.id, p)
+
+    embed = discord.Embed(
+        title="🍈 ─── KẾT QUẢ ROLL TRÁI ÁC QUỶ ─── 🍈",
+        description=(
+            f"🎉 Chúc mừng **{interaction.user.mention}** đã quay trúng:\n###"
+            f" ✨ **{chosen_fruit}** (`{f_info['type']}`)\n📜 *Mô tả:* {f_info['desc']}\n⚔️"
+            f" *Kỹ năng:* `{f_info['skill']}`\n\n*Đã cất vào kho đồ (`/kho_trai`)"
+            " của bạn!*"
+        ),
+        color=0xE91E63,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class BloxFruitPvPView(discord.ui.View):
+
+  def __init__(self, challenger, opponent, fruit_name):
+    super().__init__(timeout=60)
+    self.challenger = challenger
+    self.opponent = opponent
+    self.fruit_name = fruit_name
+
+  @discord.ui.button(
+      label="💥 Kích Hoạt Kỹ Năng Thức Tỉnh!",
+      style=discord.ButtonStyle.danger,
+      emoji="🔥",
+  )
+  async def pvp_skill(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    if interaction.user.id not in [self.challenger.id, self.opponent.id]:
+      await interaction.response.send_message(
+          "❌ Bạn không nằm trong trận đấu PvP này!", ephemeral=True
+      )
+      return
+
+    f_info = BLOXL_FRUITS_DATABASE.get(
+        self.fruit_name, {"skill": "Đấm thường hệ thống"}
+    )
+    damage = random.randint(3500, 9999)
+
+    embed = discord.Embed(
+        title="⚔️ ─── GIAO TRANH BLOX FRUITS PVP ─── ⚔️",
+        description=(
+            f"🔥 **{interaction.user.mention}** sử dụng trái"
+            f" **{self.fruit_name}**!\n✨ Thi triển kỹ năng: **{f_info['skill']}**"
+            f"\n💥 Gây ra **{damage:,} sát thương** chí mạng lên đối thủ!"
+        ),
+        color=0xF1C40F,
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+@client.tree.command(
+    name="bloxfruit", description="Mở giao diện Chợ Đen Roll Trái Ác Quỷ"
+)
+async def bloxfruit(interaction: discord.Interaction):
+  embed = discord.Embed(
+      title="🏴‍☠️ ─── CHỢ ĐEN TRÁI ÁC QUỶ (COUSIN) ─── 🏴‍☠️",
+      description=(
+          "Chào mừng hải tặc đến với vùng biển thứ nhất!\n• Dùng điểm để thử vận"
+          " may nhận các loại trái từ Thường đến Huyền Thoại.\n• Nhấn nút bên"
+          " dưới để tiến hành Roll ngay."
+      ),
+      color=0x3498DB,
+  )
+  await interaction.response.send_message(
+      embed=embed, view=BloxFruitGachaView()
+  )
+
+
+@client.tree.command(
+    name="kho_trai", description="Kiểm tra kho chứa Trái Ác Quỷ của bạn"
+)
+async def kho_trai(interaction: discord.Interaction):
+  p = get_player(interaction.user.id)
+  fruits = p["inventory"].get("fruits", {})
+
+  if not fruits:
+    await interaction.response.send_message(
+        "📦 Kho trái ác quỷ của bạn đang trống! Hãy dùng `/bloxfruit` để đi"
+        " roll.",
+        ephemeral=True,
+    )
+    return
+
+  desc = "\n".join(
+      [f"• **{f}**: `x{qty}` quả" for f, qty in fruits.items()]
+  )
+  fragments = p.get("fragments", 0)
+
+  embed = discord.Embed(
+      title=f"📦 TÚI ĐỒ HẢI TẬC CỦA {interaction.user.name.upper()}",
+      description=f"{desc}\n\n💎 **Mảnh Thức Tỉnh (Fragments):** `{fragments:,}`",
+      color=0x2ECC71,
+  )
+  await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@client.tree.command(
+    name="dotkich",
+    description="Tham gia Đột Kích (Raid) tiêu diệt Boss săn Mảnh Thức Tỉnh",
+)
+async def dotkich(interaction: discord.Interaction):
+  p = get_player(interaction.user.id)
+  success = random.choice([True, True, False])  # 66% tỷ lệ chiến thắng raid
+
+  if success:
+    fragments_earned = random.randint(500, 2000)
+    points_earned = random.randint(100000, 300000)
+
+    p["points"] += points_earned
+    if "fragments" not in p:
+      p["fragments"] = 0
+    p["fragments"] += fragments_earned
+
+    await save_player_async(interaction.user.id, p)
+
+    embed = discord.Embed(
+        title="🔥 ─── ĐỘT KÍCH THÀNH CÔNG (RAID WIN) ─── 🔥",
+        description=(
+            f"🎉 Chúc mừng **{interaction.user.mention}** đã vượt qua ngọn lửa"
+            f" thức tỉnh!\n💎 Phần thưởng nhận được:\n• **+{fragments_earned:,}"
+            f" Mảnh (Fragments)**\n• **+{points_earned:,} Điểm**"
+        ),
+        color=0x9B59B6,
+    )
+    await interaction.response.send_message(embed=embed)
+  else:
+    embed = discord.Embed(
+        title="💀 ─── ĐỘT KÍCH THẤT BẠI ─── 💀",
+        description=(
+            f"😢 Boss quá mạnh đã tiêu diệt **{interaction.user.mention}** trong"
+            " cuộc đột kích. Hãy luyện tập thêm rồi quay lại!"
+        ),
+        color=0xE74C3C,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@client.tree.command(
+    name="pvp_fruit",
+    description="Thách đấu hải tặc khác sử dụng sức mạnh Trái Ác Quỷ",
+)
+async def pvp_fruit(interaction: discord.Interaction, đối_thủ: discord.Member):
+  if đối_thủ.id == interaction.user.id:
+    await interaction.response.send_message(
+        "❌ Không thể tự đánh chính mình!", ephemeral=True
+    )
+    return
+
+  p = get_player(interaction.user.id)
+  fruits = p["inventory"].get("fruits", {})
+  if not fruits:
+    await interaction.response.send_message(
+        "❌ Bạn phải có ít nhất một trái ác quỷ trong kho mới có thể tham gia"
+        " PvP!",
+        ephemeral=True,
+    )
+    return
+
+  equipped_fruit = list(fruits.keys())[
+      0
+  ]  # Tự động lấy trái đầu tiên làm vũ khí chiến đấu
+  view = BloxFruitPvPView(interaction.user, đối_thủ, equipped_fruit)
+
+  embed = discord.Embed(
+      title="⚡ ─── THÁCH ĐẤU ĐẠI HẢI TRÌNH ─── ⚡",
+      description=(
+          f"⚔️ **{interaction.user.mention}** đã thách đấu PvP với"
+          f" **{đối_thủ.mention}**!\n🍈 Trái ác quỷ mang theo chiến đấu:"
+          f" **{equipped_fruit}**\n\n*Nhấn nút bên dưới để tung kỹ năng"
+          " thức tỉnh!*"
+      ),
+      color=0xE74C3C,
+  )
+  await interaction.response.send_message(
+      content=đối_thủ.mention, embed=embed, view=view
+  )
 
 # --- KHỞI ĐỘNG BOT VÀ GIỮ SỐNG 24/7 ---
 if __name__ == "__main__":
