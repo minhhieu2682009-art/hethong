@@ -589,33 +589,104 @@ async def shop(interaction: discord.Interaction):
   await interaction.response.send_message(embed=embed, view=ShopDynamicView())
 
 
-# --- LỆNH /tuido (XEM VÀ SỬ DỤNG VẬT PHẨM) ---
-@client.tree.command(name="tuido", description="Xem túi đồ cá nhân chứa mồi, cần câu, đồ ăn và trang bị pet")
+# --- GIAO DIỆN TƯƠNG TÁC VÀ XEM TÚI ĐỒ ---
+class InventoryActionSelect(discord.ui.Select):
+    def __init__(self, all_items):
+        options = []
+        for category, items in all_items.items():
+            for item_name, qty in items.items():
+                if qty > 0:
+                    icon = "🪱" if category == "baits" else "🎣" if category == "rods" else "🍖" if category == "gears" else "📦"
+                    if category == "foods": icon = "🍖"
+                    options.append(discord.SelectOption(
+                        label=f"{item_name} (SL: {qty})",
+                        value=f"{category}:{item_name}",
+                        description=f"Danh mục: {category.upper()}",
+                        emoji=icon
+                    ))
+        
+        if not options:
+            options.append(discord.SelectOption(label="Túi đồ trống", value="empty", description="Không có vật phẩm nào để sử dụng"))
+
+        super().__init__(placeholder="🛒 Chọn vật phẩm muốn sử dụng...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "empty":
+            await interaction.response.send_message("❌ Túi đồ của bạn đang trống!", ephemeral=True)
+            return
+
+        category, item_name = self.values[0].split(":")
+        p = get_player(interaction.user.id)
+        inv = p["inventory"]
+
+        if item_name not in inv[category] or inv[category][item_name] <= 0:
+            await interaction.response.send_message(f"❌ Vật phẩm **{item_name}** không còn trong túi!", ephemeral=True)
+            return
+
+        # Xử lý logic khi sử dụng đồ ăn cho pet
+        if category == "foods":
+            pet = p.get("pet")
+            if not pet:
+                await interaction.response.send_message("❌ Bạn chưa có Pet để sử dụng đồ ăn này!", ephemeral=True)
+                return
+            
+            inv[category][item_name] -= 1
+            if inv[category][item_name] <= 0:
+                del inv[category][item_name]
+            
+            pet["level"] += 1
+            pet["power"] += 500
+            await save_player_async(interaction.user.id, p)
+
+            embed = discord.Embed(
+                title="🍖 ─── SỬ DỤNG ĐỒ ĂN THÀNH CÔNG ─── 🍖",
+                description=f"🎉 Bạn đã dùng **{item_name}** cho **{pet['name']}**!\n📈 Cấp độ: `Cấp {pet['level']}` | Lực chiến: `{pet['power']:,}`",
+                color=0x2ECC71
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(f"✨ Bạn đã chọn tương tác với vật phẩm: **{item_name}**", ephemeral=True)
+
+class InventoryActionView(discord.ui.View):
+    def __init__(self, all_items):
+        super().__init__(timeout=60)
+        self.add_item(InventoryActionSelect(all_items))
+
+@client.tree.command(name="tuido", description="Xem túi đồ và chọn vật phẩm để sử dụng trực tiếp")
 async def tuido(interaction: discord.Interaction):
-  p = get_player(interaction.user.id)
-  inv = p["inventory"]
-  pet = p["pet"]
+    p = get_player(interaction.user.id)
+    inv = p["inventory"]
+    pet = p["pet"]
 
-  pet_str = f"🐾 **{pet['name']}** (Cấp `{pet['level']}` | Lực chiến: `{pet['power']}`)" if pet else "❌ Chưa có thú cưng"
-  title_str = f"👑 `{p['equipped_title']}`" if p["equipped_title"] else "Chưa lắp"
+    pet_str = f"🐾 **{pet['name']}** (Cấp `{pet['level']}` | Lực chiến: `{pet['power']}`)" if pet else "❌ Chưa có thú cưng"
+    title_str = f"👑 `{p['equipped_title']}`" if p["equipped_title"] else "Chưa lắp"
 
-  baits_str = ", ".join([f"{k} x{v}" for k, v in inv["baits"].items() if v > 0]) or "Trống"
-  rods_str = ", ".join([f"{k} x{v}" for k, v in inv["rods"].items() if v > 0]) or "Trống"
-  foods_str = ", ".join([f"{k} x{v}" for k, v in inv["foods"].items() if v > 0]) or "Trống"
-  gears_str = ", ".join([f"{k} x{v}" for k, v in inv["gears"].items() if v > 0]) or "Trống"
+    baits_str = ", ".join([f"{k} x{v}" for k, v in inv["baits"].items() if v > 0]) or "Trống"
+    rods_str = ", ".join([f"{k} x{v}" for k, v in inv["rods"].items() if v > 0]) or "Trống"
+    foods_str = ", ".join([f"{k} x{v}" for k, v in inv["foods"].items() if v > 0]) or "Trống"
+    gears_str = ", ".join([f"{k} x{v}" for k, v in inv["gears"].items() if v > 0]) or "Trống"
 
-  embed = discord.Embed(
-      title=f"🎒 ─── TÚI ĐỒ CỦA {interaction.user.display_name.upper()} ─── 🎒",
-      description=f"💰 Số dư điểm: **{p['points']} điểm**\n{pet_str}\n🏷️ Danh hiệu đang đeo: {title_str}",
-      color=0x34495E,
-  )
-  embed.add_field(name="🪱 Mồi Câu", value=baits_str, inline=False)
-  embed.add_field(name="🎣 Cần Câu", value=rods_str, inline=False)
-  embed.add_field(name="🍖 Đồ Ăn Cho Pet", value=foods_str, inline=False)
-  embed.add_field(name="🛡️ Trang Bị Pet", value=gears_str, inline=False)
-  embed.add_field(name="📜 Danh hiệu đã sở hữu", value=", ".join(p["titles"]) or "Chưa có", inline=False)
+    embed = discord.Embed(
+        title=f"🎒 ─── TÚI ĐỒ CỦA {interaction.user.display_name.upper()} ─── 🎒",
+        description=f"💰 Số dư điểm: **{p['points']} điểm**\n{pet_str}\n🏷️ Danh hiệu đang đeo: {title_str}",
+        color=0x34495E,
+    )
+    embed.add_field(name="🪱 Mồi Câu", value=baits_str, inline=False)
+    embed.add_field(name="🎣 Cần Câu", value=rods_str, inline=False)
+    embed.add_field(name="🍖 Đồ Ăn Cho Pet", value=foods_str, inline=False)
+    embed.add_field(name="🛡️ Trang Bị Pet", value=gears_str, inline=False)
+    embed.add_field(name="📜 Danh hiệu đã sở hữu", value=", ".join(p["titles"]) or "Chưa có", inline=False)
 
-  await interaction.response.send_message(embed=embed, ephemeral=True)
+    # Gom vật phẩm để đưa vào Menu chọn
+    all_items = {
+        "baits": inv.get("baits", {}),
+        "rods": inv.get("rods", {}),
+        "foods": inv.get("foods", {}),
+        "gears": inv.get("gears", {})
+    }
+    view = InventoryActionView(all_items)
+
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 # ==========================================
 # HỆ THỐNG BLOX FRUITS HOÀN CHỈNH (CHUẨN ĐIỂM)
 # ==========================================
