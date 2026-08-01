@@ -50,7 +50,7 @@ def get_player(user_id):
   row = cursor.fetchone()
   if not row:
     cursor.execute(
-        "INSERT INTO players VALUES (?, 500000, NULL, ?, '[]', NULL)",
+        "INSERT INTO players VALUES (?, 0, NULL, ?, '[]', NULL)",
         (user_id, str({"baits": {}, "rods": {}, "foods": {}, "gears": {}, "blox_fruits": {}})),
     )
     db.commit()
