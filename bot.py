@@ -1265,10 +1265,11 @@ async def point_edit(interaction: discord.Interaction, user: discord.Member, amo
 active_lb_channels = set()
 
 def generate_leaderboard_embed():
-    all_players = []
-    for uid, data in db.items():
-        all_players.append((int(uid), data.get("points", 0)))
+    # Sửa lại thành truy vấn SQLite thay vì gọi .items() trên biến db
+    cursor.execute("SELECT user_id, points FROM players")
+    rows = cursor.fetchall()
     
+    all_players = [(row[0], row[1] if row[1] is not None else 0) for row in rows]
     all_players.sort(key=lambda x: x[1], reverse=True)
     top_10 = all_players[:10]
 
@@ -1280,7 +1281,6 @@ def generate_leaderboard_embed():
 
     desc_list = []
     for index, (uid, pts) in enumerate(top_10, start=1):
-        # Hệ thống icon huy hiệu cực kỳ bắt mắt cho từng thứ hạng
         if index == 1:
             rank_icon = "👑"
         elif index == 2:
@@ -1294,7 +1294,7 @@ def generate_leaderboard_embed():
         if index in TOP_CONFIG:
             title_display = f" | 🏷️ **[{TOP_CONFIG[index]['title']}]**"
 
-        desc_list.append(f"{rank_icon} ── {user_mention := f'<@{uid}>'} ── 🪙 **{pts:,} pts**{title_display}")
+        desc_list.append(f"{rank_icon} ── <@{uid}> ── 🪙 **{pts:,} pts**{title_display}")
 
     embed.add_field(
         name="🏆 DANH SÁCH CAO THỦ TOP 10", 
@@ -1309,7 +1309,6 @@ async def bangxephang(interaction: discord.Interaction):
     active_lb_channels.add(interaction.channel_id)
     embed = generate_leaderboard_embed()
     await interaction.response.send_message(embed=embed)
-
 
 # --- 4. TỰ ĐỘNG CẬP NHẬT LÚC 6H SÁNG (GIỜ VN) & RESET CUỐI TUẦN ---
 async def daily_leaderboard_task():
