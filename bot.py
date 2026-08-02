@@ -1086,5 +1086,8 @@ async def on_ready():
     scheduler.add_job(weekly_leaderboard_reset, 'cron', day_of_week='sun', hour=23, minute=59)
     scheduler.start()
 
+import os
+
 if __name__ == "__main__":
-    bot.run("YOUR_DISCORD_BOT_TOKEN_HERE")
+    token = os.getenv("DISCORD_BOT_TOKEN")
+    bot.run(token)
