@@ -1515,14 +1515,14 @@ async def taixiu(interaction: discord.Interaction, sodiem: int):
     await interaction.response.send_message(embed=embed, view=view)
 
 # ==========================================
-# 10. HỆ THỐNG XẾP HẠNG & QUẢN TRỊ ADMIN (/bangxephang, /point_edit)
+# 10. HỆ THỐNG XẾP HẠNG & QUẢN TRỊ ADMIN (/bangxephang, /point_edit, /set_top1_title)
 # ==========================================
 
 @bot.tree.command(name="bangxephang", description="Xem Bảng Xếp Hạng Top 10 người chơi giàu điểm nhất Server")
 async def bangxephang(interaction: discord.Interaction):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10")
+    c.execute("SELECT user_id, points, titles FROM users ORDER BY points DESC LIMIT 10")
     top_users = c.fetchall()
     conn.close()
 
@@ -1534,11 +1534,17 @@ async def bangxephang(interaction: discord.Interaction):
 
     medal_emojis = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     desc_str = ""
-    for idx, (uid, pts) in enumerate(top_users):
+    for idx, (uid, pts, titles) in enumerate(top_users):
         user_obj = bot.get_user(uid)
         username = user_obj.name if user_obj else f"User ID: {uid}"
         medal = medal_emojis[idx] if idx < len(medal_emojis) else f"#{idx+1}"
-        desc_str += f"{medal} **{username}** — `{pts}` Điểm\n"
+        
+        display_title = ""
+        if titles:
+            first_title = titles.split(",")[0].strip()
+            display_title = f" `[{first_title}]`"
+
+        desc_str += f"{medal} **{username}**{display_title} — `{pts}` Điểm\n"
 
     embed.add_field(name="", value=desc_str if desc_str else "*Chưa có dữ liệu xếp hạng.*", inline=False)
     await interaction.response.send_message(embed=embed)
@@ -1556,6 +1562,24 @@ async def point_edit(interaction: discord.Interaction, member: discord.Member, s
         f"✅ Quản trị viên **{interaction.user.display_name}** đã {action_text} điểm của **{member.mention}** thành công!",
         ephemeral=True
     )
+
+@bot.tree.command(name="set_top1_title", description="[Admin] Thay đổi danh hiệu thưởng cho Top 1 BXH")
+@app_commands.describe(new_title="Nhận danh hiệu mới cho Top 1")
+async def set_top1_title(interaction: discord.Interaction, new_title: str):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Bạn không có quyền dùng lệnh này!", ephemeral=True)
+
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT id FROM lb_config WHERE id = 1")
+    if c.fetchone():
+        c.execute("UPDATE lb_config SET top1_title = ? WHERE id = 1", (new_title,))
+    else:
+        c.execute("INSERT INTO lb_config (id, top1_title) VALUES (1, ?)", (new_title,))
+    conn.commit()
+    conn.close()
+
+    await interaction.response.send_message(f"✅ Đã cập nhật danh hiệu Top 1 thành công thành: **{new_title}**!", ephemeral=True)
 
 # ==========================================
 # 11. KHỞI CHẠY BOT
