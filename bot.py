@@ -1345,8 +1345,8 @@ async def weekly_reset_task():
         # Kiểm tra nếu là Chủ Nhật hàng tuần
         if now.weekday() == 6:
             cursor.execute("SELECT user_id, points FROM players")
-    rows = cursor.fetchall()
-    all_players = sorted([(row[0], row[1] if row[1] is not None else 0) for row in rows], key=lambda x: x[1], reverse=True)
+            rows = cursor.fetchall()
+            all_players = sorted([(row[0], row[1] if row[1] is not None else 0) for row in rows], key=lambda x: x[1], reverse=True)
             if len(all_players) >= 1:
                 for rank_idx, (uid, pts) in enumerate(all_players[:3], start=1):
                     p = get_player(int(uid))
