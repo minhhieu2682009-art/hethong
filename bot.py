@@ -1085,45 +1085,56 @@ async def on_ready():
     scheduler.add_job(daily_leaderboard_update, 'cron', hour=6, minute=0)
     scheduler.add_job(weekly_leaderboard_reset, 'cron', day_of_week='sun', hour=23, minute=59)
     scheduler.start()
+# =========================================================
+# SYSTEM: CHAT & VOICE REWARD LOGIC
+# =========================================================
 import time
 from discord.ext import tasks
 
-# Lưu cooldown nhận điểm chat
+# Dictionary lưu cooldown chat của người dùng
 last_text_earn = {}
 
 @bot.event
 async def on_message(message):
+    # Khong tinh tin nhan tu bot hoac tin nhan riêng
     if message.author.bot or not message.guild:
         return
 
     user_id = message.author.id
     current_time = time.time()
 
-    # Chat: Cooldown 10 giây -> +10 điểm
+    # Chat: Cooldown 10 giay -> Cong 10 diem
     if user_id not in last_text_earn or (current_time - last_text_earn[user_id]) >= 10:
         last_text_earn[user_id] = current_time
         
         conn = sqlite3.connect("database.db")
         c = conn.cursor()
-        c.execute("INSERT INTO users (user_id, points) VALUES (?, 10) ON CONFLICT(user_id) DO UPDATE SET points = points + 10", (user_id,))
+        c.execute(
+            "INSERT INTO users (user_id, points) VALUES (?, 10) ON CONFLICT(user_id) DO UPDATE SET points = points + 10", 
+            (user_id,)
+        )
         conn.commit()
         conn.close()
 
     await bot.process_commands(message)
 
-# Loop Voice: 10 giây quét 1 lần -> +20 điểm
+# Task Voice: Chay dinh ky 10 giay 1 lan -> Cong 20 diem
 @tasks.loop(seconds=10)
 async def voice_reward_task():
     for guild in bot.guilds:
         for vc in guild.voice_channels:
             for member in vc.members:
+                # Khong cong diem cho Bot, nguoi bi Mute Tai, hoac AFK
                 if member.bot or member.voice.self_deaf or member.voice.afk:
                     continue
                 
                 user_id = member.id
                 conn = sqlite3.connect("database.db")
                 c = conn.cursor()
-                c.execute("INSERT INTO users (user_id, points) VALUES (?, 20) ON CONFLICT(user_id) DO UPDATE SET points = points + 20", (user_id,))
+                c.execute(
+                    "INSERT INTO users (user_id, points) VALUES (?, 20) ON CONFLICT(user_id) DO UPDATE SET points = points + 20", 
+                    (user_id,)
+                )
                 conn.commit()
                 conn.close()
 
@@ -1131,7 +1142,34 @@ async def voice_reward_task():
 async def before_voice_task():
     await bot.wait_until_ready()
 
-voice_reward_task.start()
+
+# =========================================================
+# BOT EVENTS & STARTUP
+# =========================================================
+@bot.event
+async def on_ready():
+    print(f"✅ Bot đã đăng nhập thành công dưới tên: {bot.user}")
+    
+    # Kich hoat loop Voice an toan ben trong event loop
+    if not voice_reward_task.is_running():
+        voice_reward_task.start()
+
+    try:
+        synced = await bot.tree.sync()
+        print(f"🔄 Đã đồng bộ {len(synced)} lệnh Slash Commands.")
+    except Exception as e:
+        print(f"❌ Lỗi đồng bộ lệnh: {e}")
+
+    bot.add_view(ShopMainView())
+    bot.add_view(FishingView())
+
+    scheduler.add_job(daily_leaderboard_update, 'cron', hour=6, minute=0)
+    scheduler.add_job(weekly_leaderboard_reset, 'cron', day_of_week='sun', hour=23, minute=59)
+    scheduler.start()
+
+if __name__ == "__main__":
+    token = os.getenv("DISCORD_BOT_TOKEN")
+    bot.run(token)
 import os
 
 if __name__ == "__main__":
