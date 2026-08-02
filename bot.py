@@ -1,3 +1,4 @@
+import os
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
@@ -1166,11 +1167,6 @@ async def on_ready():
     scheduler.add_job(daily_leaderboard_update, 'cron', hour=6, minute=0)
     scheduler.add_job(weekly_leaderboard_reset, 'cron', day_of_week='sun', hour=23, minute=59)
     scheduler.start()
-
-if __name__ == "__main__":
-    token = os.getenv("DISCORD_BOT_TOKEN")
-    bot.run(token)
-import os
 
 if __name__ == "__main__":
     token = os.getenv("DISCORD_BOT_TOKEN")
