@@ -944,7 +944,7 @@ class SelectBaitDropdown(discord.ui.Select):
         conn.commit()
         conn.close()
 
-        await interaction.response.send_message(f"🪱 Đã gắn mồi **{chosen_bait}}** vào lưỡi câu! Sẵn sàng thả mồi.", ephemeral=True)
+        await interaction.response.send_message(f"🪱 Đã gắn mồi **{chosen_bait}** vào lưỡi câu! Sẵn sàng thả mồi.", ephemeral=True)
 
 class SelectBaitView(discord.ui.View):
     def __init__(self, user_id):
