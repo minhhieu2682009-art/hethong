@@ -961,7 +961,7 @@ class ShopCategorySelect(discord.ui.Select):
             discord.SelectOption(label=f"{item[1]} - {item[2]} Điểm", description=item[3][:50], value=str(item[0]))
             for item in items[:25]
         ]
-        super().__init__(placeholder="🛒 Chọn vật phẩm bạn muốn mua...", options=options)
+        super().__init__(placeholder="🛒 Chọn vật phẩm muốn mua...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         item_id = int(self.values[0])
@@ -981,7 +981,6 @@ class ShopCategorySelect(discord.ui.Select):
 
         update_points(interaction.user.id, -i_price)
 
-        # Thêm vào kho
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         c.execute("SELECT id, quantity FROM inventory WHERE user_id = ? AND item_name = ?", (interaction.user.id, i_name))
@@ -997,7 +996,7 @@ class ShopCategorySelect(discord.ui.Select):
 
 class ShopMainView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None) # timeout=None không bao giờ hết hạn
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="🎣 Cần & Mồi", style=discord.ButtonStyle.primary, custom_id="btn_shop_rods")
     async def shop_rods(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1043,7 +1042,53 @@ async def shop(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=ShopMainView())
 
-@bot.tree.command(name="tuido", description="Xem Điểm, Danh hiệu, Vật phẩm & Trang bị đồ mua từ Shop")
+# --- PHẦN TÚI ĐỒ VÀ MENU CHỌN VẬT PHẨM SỬ DỤNG ---
+class InventorySelect(discord.ui.Select):
+    def __init__(self, items):
+        options = []
+        for name, qty, eq in items[:25]:
+            eq_text = " (Đang trang bị)" if eq == 1 else ""
+            options.append(discord.SelectOption(
+                label=f"{name} (x{qty})",
+                description=f"Bấm để sử dụng hoặc kích hoạt vật phẩm này{eq_text}",
+                value=name,
+                emoji="🎒"
+            ))
+        super().__init__(placeholder="🎒 Chọn vật phẩm muốn sử dụng...", options=options, min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        item_name = self.values[0]
+        user_id = interaction.user.id
+
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("SELECT quantity FROM inventory WHERE user_id = ? AND item_name = ?", (user_id, item_name))
+        row = c.fetchone()
+
+        if not row or row[0] <= 0:
+            conn.close()
+            return await interaction.response.send_message("❌ Vật phẩm này không còn trong túi đồ của bạn!", ephemeral=True)
+
+        current_qty = row[0]
+        new_qty = current_qty - 1
+
+        if new_qty <= 0:
+            c.execute("DELETE FROM inventory WHERE user_id = ? AND item_name = ?", (user_id, item_name))
+        else:
+            c.execute("UPDATE inventory SET quantity = ? WHERE user_id = ? AND item_name = ?", (new_qty, user_id, item_name))
+        
+        conn.commit()
+        conn.close()
+
+        await interaction.response.send_message(f"✨ Bạn đã sử dụng thành công **{item_name}** từ túi đồ!", ephemeral=True)
+
+class InventoryView(discord.ui.View):
+    def __init__(self, items):
+        super().__init__(timeout=180)
+        if items:
+            self.add_item(InventorySelect(items))
+
+@bot.tree.command(name="tuido", description="Xem Điểm, Danh hiệu, Vật phẩm & Sử dụng đồ từ túi")
 async def tuido(interaction: discord.Interaction):
     user_id = interaction.user.id
     u_data = get_user(user_id)
@@ -1058,16 +1103,21 @@ async def tuido(interaction: discord.Interaction):
     embed.add_field(name="💰 Số Điểm Hiện Có", value=f"`{u_data['points']}` Điểm", inline=True)
     embed.add_field(name="🏆 Danh Hiệu Sở Hữu", value=f"`{u_data['titles'] or 'Chưa có'}`", inline=True)
 
+    view = None
     if inv_items:
         inv_str = ""
         for name, qty, eq in inv_items:
             eq_status = " 🟢 [ĐANG TRANG BỊ]" if eq == 1 else ""
             inv_str += f"• **{name}** x{qty}{eq_status}\n"
         embed.add_field(name="📦 Vật Phẩm Trong Kho", value=inv_str[:1024], inline=False)
+        view = InventoryView(inv_items)
     else:
         embed.add_field(name="📦 Vật Phẩm Trong Kho", value="*Túi đồ của bạn đang trống! Hãy ghé /shop để mua sắm.*", inline=False)
 
-    await interaction.response.send_message(embed=embed)
+    if view:
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    else:
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ==========================================
 # 9. CÁC LỆNH MINI-GAME & TƯƠNG TÁC (/cuop, /taixiu)
