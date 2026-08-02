@@ -1230,6 +1230,16 @@ async def point_edit(interaction: discord.Interaction, member: discord.Member, s
 
 import os
 
+@bot.event
+async def on_ready():
+    try:
+        synced = await bot.tree.sync()
+        print(f"Đã đồng bộ thành công {len(synced)} lệnh slash!")
+    except Exception as e:
+        print(f"Lỗi đồng bộ lệnh: {e}")
+    
+    print(f"Bot đã đăng nhập thành công với tên: {bot.user.name}")
+
 # Ưu tiên lấy token từ biến môi trường trên Render, nếu không có sẽ nhận giá trị dự phòng bên dưới
 BOT_TOKEN = os.getenv("BOT_TOKEN", "ĐIỀN_TOKEN_CỦA_BẠN_VÀO_ĐÂY_NẾU_KHÔNG_DÙNG_ENV")
 
