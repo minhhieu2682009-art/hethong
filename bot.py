@@ -688,82 +688,162 @@ async def tuido(interaction: discord.Interaction):
     view = InventoryActionView(all_items)
 
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-# ==========================================
-# HỆ THỐNG BLOX FRUITS HOÀN CHỈNH (CHUẨN ĐIỂM)
-# ==========================================
-
 import random
 import discord
 
-# Dữ liệu chuẩn các loại Trái Ác Quỷ (Độ hiếm, Giá trị, Kỹ năng thức tỉnh)
+# ==========================================
+# DATABASE MỞ RỘNG (ĐÃ CÂN BẰNG LẠI KINH TẾ)
+# ==========================================
+
 BLOXL_FRUITS_DATABASE = {
     "Rocket": {
         "type": "Thường (Common)",
         "price": 5000,
         "desc": "Tên lửa tầm trung, dễ kiếm cho tân thủ.",
         "skill": "Phóng tên lửa định hướng",
+        "mult": 1.0,
     },
     "Spin": {
         "type": "Thường (Common)",
         "price": 7500,
         "desc": "Xoay vòng tròn né tránh sát thương.",
         "skill": "Cơn lốc xoáy phi thân",
+        "mult": 1.1,
     },
     "Flame": {
         "type": "Nguyên tố (Elemental)",
         "price": 250000,
         "desc": "Hỏa quyền thiêu đốt mọi mục tiêu.",
         "skill": "Đại hồng liên hỏa diệm",
+        "mult": 1.3,
     },
     "Ice": {
         "type": "Nguyên tố (Elemental)",
         "price": 350000,
         "desc": "Đóng băng diện rộng, kiểm soát kẻ địch.",
         "skill": "Kỷ băng hà vĩnh cửu",
+        "mult": 1.4,
     },
     "Light": {
         "type": "Nguyên tố (Elemental)",
         "price": 650000,
         "desc": "Tốc độ ánh sáng, đâm xuyên kẻ thù.",
         "skill": "Kiếm quang chiếu rọi",
+        "mult": 1.6,
     },
     "Magma": {
         "type": "Nguyên tố (Elemental)",
         "price": 850000,
         "desc": "Gây sát thương hệ dung nham cực kỳ lớn.",
         "skill": "Mưa hỏa sơn hủy diệt",
+        "mult": 1.8,
     },
     "Buddha": {
         "type": "Thú vật (Beast)",
         "price": 1200000,
         "desc": "Hóa thân Phật Tổ tăng cực nhiều giáp và tầm đánh.",
         "skill": "Kim thân bất tử",
+        "mult": 2.1,
     },
     "Portal": {
         "type": "Đặc biệt (Special)",
         "price": 1900000,
         "desc": "Dịch chuyển tức thời qua không gian.",
         "skill": "Cổng không gian chiều thứ V",
+        "mult": 2.4,
     },
     "Dough": {
         "type": "Huyền thoại (Legendary)",
         "price": 2800000,
         "desc": "Sức mạnh bột nhào thức tỉnh tối thượng (Awakened).",
         "skill": "Mưa bánh rán xuyên giáp",
+        "mult": 2.8,
     },
     "Leopard": {
         "type": "Huyền thoại (Legendary)",
         "price": 5000000,
         "desc": "Hóa báo đốm với tốc độ di chuyển và combo vô địch.",
         "skill": "Móng vuốt báo xé gió",
+        "mult": 3.5,
     },
     "Dragon": {
         "type": "Huyền thoại (Legendary)",
         "price": 3500000,
         "desc": "Hóa Rồng thiêu rụi toàn bộ chiến trường Sea.",
         "skill": "Hơi thở rồng tận thế",
+        "mult": 4.0,
     },
 }
+
+# Tăng mạnh HP Boss và giảm phần thưởng để chống lạm phát kinh tế
+BOSSES = {
+    "The Saw": {"hp": 150000, "sea": 1, "reward_pts": 15000, "reward_frag": 30},
+    "Smoke Admiral": {
+        "hp": 450000,
+        "sea": 2,
+        "reward_pts": 45000,
+        "reward_frag": 80,
+    },
+    "Beautiful Pirate": {
+        "hp": 900000,
+        "sea": 3,
+        "reward_pts": 100000,
+        "reward_frag": 180,
+    },
+    "Sea Beast": {
+        "hp": 2000000,
+        "sea": 2,
+        "reward_pts": 200000,
+        "reward_frag": 350,
+    },
+}
+
+PLAYERS_DB = {}
+
+
+def get_player(user_id):
+  if user_id not in PLAYERS_DB:
+    PLAYERS_DB[user_id] = {
+        "level": 1,
+        "exp": 0,
+        "max_exp": 1000,
+        "sea": 1,
+        "points": 100000,  # Khởi đầu vừa phải
+        "fragments": 100,
+        "pity_counter": 0,
+        "equipped_fruit": None,
+        "awakened": False,
+        "stats": {
+            "melee": 10,
+            "defense": 10,
+            "sword": 10,
+            "fruit": 10,
+            "stat_points": 0,
+        },
+        "inventory": {"fruits": {}},
+    }
+  return PLAYERS_DB[user_id]
+
+
+def add_exp(p, amount):
+  p["exp"] += amount
+  leveled_up = False
+  while p["exp"] >= p["max_exp"]:
+    p["exp"] -= p["max_exp"]
+    p["level"] += 1
+    p["max_exp"] = int(p["max_exp"] * 1.4)
+    p["stats"]["stat_points"] += 3
+    leveled_up = True
+    if p["level"] >= 50 and p["sea"] == 1:
+      p["sea"] = 2
+    elif p["level"] >= 120 and p["sea"] == 2:
+      p["sea"] = 3
+  return leveled_up
+
+
+# ==========================================
+# 1. GIAO DIỆN GACHA & SHOP TRÁI ÁC QUỶ
+# ==========================================
 
 
 class BloxFruitGachaView(discord.ui.View):
@@ -772,226 +852,298 @@ class BloxFruitGachaView(discord.ui.View):
     super().__init__(timeout=None)
 
   @discord.ui.button(
-      label="🎰 Roll Trái Ác Quỷ (50k Điểm)",
-      style=discord.ButtonStyle.success,
-      emoji="🍈",
-      custom_id="bf_roll_btn_v3",
+      label="🎰 Roll Trái (50k)", style=discord.ButtonStyle.success, emoji="🍈"
   )
   async def roll_fruit(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
     p = get_player(interaction.user.id)
     cost = 50000
-
     if p["points"] < cost:
       await interaction.response.send_message(
-          f"❌ Bạn không đủ điểm! Cần ít nhất `{cost:,} điểm` để roll.",
-          ephemeral=True,
+          "❌ Bạn không đủ 50,000 Điểm để roll!", ephemeral=True
       )
       return
 
     p["points"] -= cost
+    p["pity_counter"] += 1
 
     fruits = list(BLOXL_FRUITS_DATABASE.keys())
-    weights = [30, 25, 15, 12, 8, 5, 3, 1.5, 0.4, 0.1, 1.0]
-    chosen_fruit = random.choices(fruits, weights=weights, k=1)[0]
+    if p["pity_counter"] >= 12:
+      high_tier = [
+          "Magma",
+          "Buddha",
+          "Portal",
+          "Dough",
+          "Leopard",
+          "Dragon",
+      ]
+      chosen_fruit = random.choice(high_tier)
+      p["pity_counter"] = 0
+    else:
+      weights = [35, 25, 15, 10, 7, 4, 2, 1.2, 0.5, 0.1, 0.2]
+      chosen_fruit = random.choices(fruits, weights=weights, k=1)[0]
+      if chosen_fruit not in ["Rocket", "Spin"]:
+        p["pity_counter"] = 0
+
     f_info = BLOXL_FRUITS_DATABASE[chosen_fruit]
-
-    if "fruits" not in p["inventory"]:
-      p["inventory"]["fruits"] = {}
-    p["inventory"]["fruits"][chosen_fruit] = (
-        p["inventory"]["fruits"].get(chosen_fruit, 0) + 1
-    )
-
-    await save_player_async(interaction.user.id, p)
+    inv = p["inventory"]["fruits"]
+    if chosen_fruit in inv:
+      inv[chosen_fruit] += 1
+      frag_add = int(f_info["price"] / 15000)
+      p["fragments"] += frag_add
+      dup_text = f"\n🔄 *Trùng lặp! Đổi thành **+{frag_add} Fragments**.*"
+    else:
+      inv[chosen_fruit] = 1
+      dup_text = "\n✨ *Đã cất vào kho đồ (`/kho_trai`)*"
 
     embed = discord.Embed(
-        title="🍈 ─── KẾT QUẢ ROLL TRÁI ÁC QUỶ ─── 🍈",
+        title="🍈 ─── KẾT QUẢ GACHA ─── 🍈",
         description=(
-            f"🎉 Chúc mừng **{interaction.user.mention}** đã quay trúng:\n###"
-            f" ✨ **{chosen_fruit}** (`{f_info['type']}`)\n📜 *Mô tả:* {f_info['desc']}\n⚔️"
-            f" *Kỹ năng:* `{f_info['skill']}`\n\n*Đã cất vào kho đồ (`/kho_trai`)"
-            " của bạn!*"
+            f"🎉 **{interaction.user.mention}** nhận được:\n### 🌟"
+            f" **{chosen_fruit}** (`{f_info['type']}`)\n📜 *Mô tả:*"
+            f" {f_info['desc']}\n⚔️ *Kỹ năng:* `{f_info['skill']}`{dup_text}"
         ),
         color=0xE91E63,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-class BloxFruitPvPView(discord.ui.View):
+# ==========================================
+# 2. GIAO DIỆN SĂN BOSS & RAID CO-OP
+# ==========================================
 
-  def __init__(self, challenger, opponent, fruit_name):
+
+class RaidBossView(discord.ui.View):
+
+  def __init__(self, boss_name, boss_data):
     super().__init__(timeout=60)
-    self.challenger = challenger
-    self.opponent = opponent
-    self.fruit_name = fruit_name
+    self.boss_name = boss_name
+    self.boss_hp = boss_data["hp"]
+    self.max_hp = boss_data["hp"]
+    self.data = boss_data
+    self.participants = {}
 
   @discord.ui.button(
-      label="💥 Kích Hoạt Kỹ Năng Thức Tỉnh!",
-      style=discord.ButtonStyle.danger,
-      emoji="🔥",
+      label="💥 Tấn Công Boss", style=discord.ButtonStyle.danger, emoji="⚔️"
   )
-  async def pvp_skill(
+  async def attack_boss(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    if interaction.user.id not in [self.challenger.id, self.opponent.id]:
-      await interaction.response.send_message(
-          "❌ Bạn không nằm trong trận đấu PvP này!", ephemeral=True
+    p = get_player(interaction.user.id)
+    uid = interaction.user.id
+    if uid not in self.participants:
+      self.participants[uid] = 0
+
+    base_dmg = (p["level"] * 30) + (p["stats"]["fruit"] * 15)
+    fruit_mult = 1.0
+    if p["equipped_fruit"]:
+      fruit_mult = BLOXL_FRUITS_DATABASE[p["equipped_fruit"]]["mult"]
+      if p["awakened"]:
+        fruit_mult *= 1.4
+
+    total_dmg = int(base_dmg * fruit_mult * random.uniform(0.8, 1.2))
+    self.boss_hp -= total_dmg
+    self.participants[uid] += total_dmg
+
+    if self.boss_hp <= 0:
+      for pid in self.participants:
+        pl = get_player(pid)
+        pl["points"] += self.data["reward_pts"]
+        pl["fragments"] += self.data["reward_frag"]
+        add_exp(pl, 500)
+
+      end_embed = discord.Embed(
+          title=f"🏆 ─── ĐÃ TIÊU DIỆT BOSS {self.boss_name.upper()}! ─── 🏆",
+          description=(
+              f"🎉 Vượt ải thành công!\n💎 Thưởng cho mỗi người tham"
+              f" gia:\n• **+{self.data['reward_pts']:,} Điểm**\n•"
+              f" **+{self.data['reward_frag']:,} Fragments**\n• **+500 EXP**"
+          ),
+          color=0x2ECC71,
       )
+      for child in self.children:
+        child.disabled = True
+      await interaction.response.edit_message(embed=end_embed, view=self)
       return
 
-    f_info = BLOXL_FRUITS_DATABASE.get(
-        self.fruit_name, {"skill": "Đấm thường hệ thống"}
-    )
-    damage = random.randint(3500, 9999)
-
     embed = discord.Embed(
-        title="⚔️ ─── GIAO TRANH BLOX FRUITS PVP ─── ⚔️",
+        title=f"🔥 ─── ĐỘT KÍCH: {self.boss_name.upper()} ─── 🔥",
         description=(
-            f"🔥 **{interaction.user.mention}** sử dụng trái"
-            f" **{self.fruit_name}**!\n✨ Thi triển kỹ năng: **{f_info['skill']}**"
-            f"\n💥 Gây ra **{damage:,} sát thương** chí mạng lên đối thủ!"
+            f"💥 **{interaction.user.mention}** gây ra **{total_dmg:,}"
+            f" sát thương**!\n❤️ Máu Boss:"
+            f" `🪓 {max(0, self.boss_hp):,}/{self.max_hp:,} HP`\n👥 Tham gia:"
+            f" `{len(self.participants)} người`"
         ),
-        color=0xF1C40F,
+        color=0xE74C3C,
     )
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.edit_message(embed=embed, view=self)
 
 
-@client.tree.command(
-    name="bloxfruit", description="Mở giao diện Chợ Đen Roll Trái Ác Quỷ"
-)
-async def bloxfruit(interaction: discord.Interaction):
+# ==========================================
+# CÁC LỆNH HỆ THỐNG
+# ==========================================
+
+
+async def profile(interaction: discord.Interaction):
+  p = get_player(interaction.user.id)
+  s = p["stats"]
+  fruit_str = (
+      f"✨ {p['equipped_fruit']} "
+      f"{'*(Thức Tỉnh)*' if p['awakened'] else '*(Thường)*'}"
+      if p["equipped_fruit"]
+      else "Chưa trang bị"
+  )
+
   embed = discord.Embed(
-      title="🏴‍☠️ ─── CHỢ ĐEN TRÁI ÁC QUỶ (COUSIN) ─── 🏴‍☠️",
+      title=f"🏴‍☠️ HỒ SƠ HẢI TẬC: {interaction.user.name.upper()}",
       description=(
-          "Chào mừng hải tặc đến với vùng biển thứ nhất!\n• Dùng điểm để thử vận"
-          " may nhận các loại trái từ Thường đến Huyền Thoại.\n• Nhấn nút bên"
-          " dưới để tiến hành Roll ngay."
+          f"📊 **Cấp độ:** `{p['level']}` (Sea `{p['sea']}`)\n📈 **EXP:**"
+          f" `{p['exp']:,} / {p['max_exp']:,}`\n🍈 **Trái đang dùng:**"
+          f" {fruit_str}\n💰 **Điểm (Beli):**"
+          f" `{p['points']:,}`\n💎 **Fragments:** `{p['fragments']:,}`\n\n🎯"
+          f" **CHỈ SỐ TIỀM NĂNG (Dư: {s['stat_points']} điểm):**\n• Cận chiến"
+          f" (Melee): `{s['melee']}`\n• Phòng thủ (Defense):"
+          f" `{s['defense']}`\n• Kiếm sĩ (Sword): `{s['sword']}`\n• Trái Ác Quỷ"
+          f" (Fruit): `{s['fruit']}`"
       ),
       color=0x3498DB,
-  )
-  await interaction.response.send_message(
-      embed=embed, view=BloxFruitGachaView()
-  )
-
-
-@client.tree.command(
-    name="kho_trai", description="Kiểm tra kho chứa Trái Ác Quỷ của bạn"
-)
-async def kho_trai(interaction: discord.Interaction):
-  p = get_player(interaction.user.id)
-  fruits = p["inventory"].get("fruits", {})
-
-  if not fruits:
-    await interaction.response.send_message(
-        "📦 Kho trái ác quỷ của bạn đang trống! Hãy dùng `/bloxfruit` để đi"
-        " roll.",
-        ephemeral=True,
-    )
-    return
-
-  desc = "\n".join(
-      [f"• **{f}**: `x{qty}` quả" for f, qty in fruits.items()]
-  )
-  fragments = p.get("fragments", 0)
-
-  embed = discord.Embed(
-      title=f"📦 TÚI ĐỒ HẢI TẬC CỦA {interaction.user.name.upper()}",
-      description=f"{desc}\n\n💎 **Mảnh Thức Tỉnh (Fragments):** `{fragments:,}`",
-      color=0x2ECC71,
   )
   await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@client.tree.command(
-    name="dotkich",
-    description="Tham gia Đột Kích (Raid) tiêu diệt Boss săn Mảnh Thức Tỉnh",
-)
-async def dotkich(interaction: discord.Interaction):
+async def stats_up(
+    interaction: discord.Interaction, chỉ_số: str, số_lượng: int = 1
+):
   p = get_player(interaction.user.id)
-  success = random.choice([True, True, False])  # 66% tỷ lệ chiến thắng raid
+  s = p["stats"]
 
-  if success:
-    fragments_earned = random.randint(500, 2000)
-    points_earned = random.randint(100000, 300000)
-
-    p["points"] += points_earned
-    if "fragments" not in p:
-      p["fragments"] = 0
-    p["fragments"] += fragments_earned
-
-    await save_player_async(interaction.user.id, p)
-
-    embed = discord.Embed(
-        title="🔥 ─── ĐỘT KÍCH THÀNH CÔNG (RAID WIN) ─── 🔥",
-        description=(
-            f"🎉 Chúc mừng **{interaction.user.mention}** đã vượt qua ngọn lửa"
-            f" thức tỉnh!\n💎 Phần thưởng nhận được:\n• **+{fragments_earned:,}"
-            f" Mảnh (Fragments)**\n• **+{points_earned:,} Điểm**"
-        ),
-        color=0x9B59B6,
-    )
-    await interaction.response.send_message(embed=embed)
-  else:
-    embed = discord.Embed(
-        title="💀 ─── ĐỘT KÍCH THẤT BẠI ─── 💀",
-        description=(
-            f"😢 Boss quá mạnh đã tiêu diệt **{interaction.user.mention}** trong"
-            " cuộc đột kích. Hãy luyện tập thêm rồi quay lại!"
-        ),
-        color=0xE74C3C,
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-@client.tree.command(
-    name="pvp_fruit",
-    description="Thách đấu hải tặc khác sử dụng sức mạnh Trái Ác Quỷ",
-)
-async def pvp_fruit(interaction: discord.Interaction, đối_thủ: discord.Member):
-  if đối_thủ.id == interaction.user.id:
+  if số_lượng <= 0 or s["stat_points"] < số_lượng:
     await interaction.response.send_message(
-        "❌ Không thể tự đánh chính mình!", ephemeral=True
-    )
-    return
-
-  p = get_player(interaction.user.id)
-  fruits = p["inventory"].get("fruits", {})
-  if not fruits:
-    await interaction.response.send_message(
-        "❌ Bạn phải có ít nhất một trái ác quỷ trong kho mới có thể tham gia"
-        " PvP!",
+        "❌ Số lượng điểm không hợp lệ hoặc không đủ điểm tiềm năng!",
         ephemeral=True,
     )
     return
 
-  equipped_fruit = list(fruits.keys())[
-      0
-  ]  # Tự động lấy trái đầu tiên làm vũ khí chiến đấu
-  view = BloxFruitPvPView(interaction.user, đối_thủ, equipped_fruit)
+  chỉ_số = chỉ_số.lower()
+  if chỉ_số not in ["melee", "defense", "sword", "fruit"]:
+    await interaction.response.send_message(
+        "❌ Chỉ số không tồn tại! Chọn: `melee`, `defense`, `sword`, `fruit`.",
+        ephemeral=True,
+    )
+    return
+
+  s["stat_points"] -= số_lượng
+  s[chỉ_số] += số_lượng
+  await interaction.response.send_message(
+      f"✅ Đã tăng `{số_lượng}` điểm vào **{chỉ_số.upper()}**!", ephemeral=True
+  )
+
+
+async def shop_fruit(interaction: discord.Interaction):
+  sample_fruits = random.sample(list(BLOXL_FRUITS_DATABASE.keys()), 3)
+  desc = "🏴‍☠️ **Cửa hàng Chợ Đen (Blox Fruit Stock):**\n\n"
+  for f in sample_fruits:
+    info = BLOXL_FRUITS_DATABASE[f]
+    desc += (
+        f"• **{f}** (`{info['type']}`) - Giá: `{info['price']:,} Điểm`\n  📜"
+        f" *{info['desc']}*\n\n"
+    )
+
+  desc += "👉 Dùng lệnh `/mua_trai [tên_trái]` để mua!"
+  embed = discord.Embed(
+      title="🛒 ─── CỬA HÀNG TRÁI ÁC QUỶ ─── 🛒",
+      description=desc,
+      color=0xF1C40F,
+  )
+  await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+async def mua_trai(interaction: discord.Interaction, tên_trái: str):
+  if tên_trái not in BLOXL_FRUITS_DATABASE:
+    await interaction.response.send_message(
+        "❌ Không tìm thấy tên trái ác quỷ này!", ephemeral=True
+    )
+    return
+
+  p = get_player(interaction.user.id)
+  info = BLOXL_FRUITS_DATABASE[tên_trái]
+  price = info["price"]
+
+  if p["points"] < price:
+    await interaction.response.send_message(
+        f"❌ Không đủ tiền! Cần `{price:,} Điểm`.", ephemeral=True
+    )
+    return
+
+  p["points"] -= price
+  p["inventory"]["fruits"][tên_trái] = (
+      p["inventory"]["fruits"].get(tên_trái, 0) + 1
+  )
+  await interaction.response.send_message(
+      f"🎉 Đã mua thành công trái **{tên_trái}**!", ephemeral=True
+  )
+
+
+async def do_quest(interaction: discord.Interaction):
+  p = get_player(interaction.user.id)
+  exp_gain = random.randint(200, 450)
+  pts_gain = random.randint(15000, 35000)
+
+  p["points"] += pts_gain
+  leveled_up = add_exp(p, exp_gain)
+  extra_msg = (
+      f"\n🎉 **[LÊN CẤP!]** Đạt Level **{p['level']}** (Sea `{p['sea']}`)!"
+      if leveled_up
+      else ""
+  )
 
   embed = discord.Embed(
-      title="⚡ ─── THÁCH ĐẤU ĐẠI HẢI TRÌNH ─── ⚡",
+      title="📜 ─── HOÀN THÀNH NHIỆM VỤ ─── 📜",
       description=(
-          f"⚔️ **{interaction.user.mention}** đã thách đấu PvP với"
-          f" **{đối_thủ.mention}**!\n🍈 Trái ác quỷ mang theo chiến đấu:"
-          f" **{equipped_fruit}**\n\n*Nhấn nút bên dưới để tung kỹ năng"
-          " thức tỉnh!*"
+          f"⚔️ **{interaction.user.mention}** hoàn thành nhiệm vụ ở Sea"
+          f" {p['sea']}!\n🎁 Nhận:\n• **+{exp_gain} EXP**\n•"
+          f" **+{pts_gain:,} Điểm**{extra_msg}"
+      ),
+      color=0x2ECC71,
+  )
+  await interaction.response.send_message(embed=embed)
+
+
+async def dotkich_boss(
+    interaction: discord.Interaction, chọn_boss: str = "The Saw"
+):
+  if chọn_boss not in BOSSES:
+    chọn_boss = "The Saw"
+  b_data = BOSSES[chọn_boss]
+
+  p = get_player(interaction.user.id)
+  if p["sea"] < b_data["sea"]:
+    await interaction.response.send_message(
+        f"❌ Cấp độ chưa đủ! Cần đạt Sea {b_data['sea']} để săn"
+        f" **{chọn_boss}**.",
+        ephemeral=True,
+    )
+    return
+
+  view = RaidBossView(chọn_boss, b_data)
+  embed = discord.Embed(
+      title=f"⚠️ ─── SĂN BOSS: {chọn_boss.upper()} ─── ⚠️",
+      description=(
+          f"🏴‍☠️ **{interaction.user.mention}** đã khơi mào trận đánh"
+          f" boss!\n\n❤️ Máu Boss: `🪓 {b_data['hp']:,} HP`\n👉 Nhấn nút liên"
+          " tục bên dưới để tấn công!"
       ),
       color=0xE74C3C,
   )
   await interaction.response.send_message(
-      content=đối_thủ.mention, embed=embed, view=view
+      content=interaction.user.mention, embed=embed, view=view
   )
-import asyncio
-from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
 
 # Múi giờ Việt Nam để đảm bảo 6h sáng chạy chính xác
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 # --- 1. CƠ CHẾ KIẾM ĐIỂM QUA CHAT & VOICE (CÓ CHỐNG SPAM) ---
-# Từ điển lưu thời điểm chat gần nhất của mỗi user để chống spam điểm
 chat_cooldowns = {}
 
 @client.event
@@ -1010,8 +1162,10 @@ async def on_message(message):
             
     chat_cooldowns[user_id] = now
     
-    # Cộng điểm chat
+    # Cộng điểm chat qua hàm chuẩn của bot
     p = get_player(user_id)
+    if "points" not in p:
+        p["points"] = 0
     p["points"] += 15
     await save_player_async(user_id, p)
     
@@ -1026,6 +1180,8 @@ async def voice_point_loop():
             for member in guild.members:
                 if member.voice and member.voice.channel and not member.bot:
                     p = get_player(member.id)
+                    if "points" not in p:
+                        p["points"] = 0
                     p["points"] += 20
                     await save_player_async(member.id, p)
 
@@ -1040,7 +1196,7 @@ async def on_ready():
         client.bg_tasks_started = True
 
 
-# --- 2. CẤU HÌNH DANH HIỆU TOP (ADMIN CÓ THỂ ĐỔI) ---
+# --- 2. CẤU HÌNH DANH HIỆU TOP & LỆNH ADMIN ---
 TOP_CONFIG = {
     1: {"title": "Khư Quỷ", "color": 0xE74C3C},   # Top 1: Đỏ
     2: {"title": "Khu La", "color": 0x3498DB},    # Top 2: Xanh dương
@@ -1051,19 +1207,58 @@ TOP_CONFIG = {
 @app_commands.checks.has_permissions(administrator=True)
 async def set_top_title(interaction: discord.Interaction, rank: int, title: str, color_hex: str):
     if rank not in [1, 2, 3]:
-        await interaction.response.send_message("❌ Chỉ có thể cấu hình cho Top 1, 2 hoặc 3!", ephemeral=True)
+        await interaction.response.send_message("❌ **Lỗi:** Chỉ có thể cấu hình cho Top 1, 2 hoặc 3!", ephemeral=True)
         return
     
     try:
         color_int = int(color_hex.replace("#", ""), 16)
     except ValueError:
-        await interaction.response.send_message("❌ Mã màu không hợp lệ! Hãy dùng dạng HEX (Ví dụ: E74C3C)", ephemeral=True)
+        await interaction.response.send_message("❌ **Lỗi:** Mã màu không hợp lệ! Hãy dùng dạng HEX (Ví dụ: `E74C3C`)", ephemeral=True)
         return
     
     TOP_CONFIG[rank]["title"] = title
     TOP_CONFIG[rank]["color"] = color_int
     
-    await interaction.response.send_message(f"✅ Đã cập nhật thành công danh hiệu **Top {rank}** thành `[{title}]`!", ephemeral=True)
+    embed = discord.Embed(
+        title="🛠️ ─── CẬP NHẬT DANH HIỆU THÀNH CÔNG ─── 🛠️",
+        description=f"✨ Đã thay đổi danh hiệu **Top {rank}** thành: `[{title}]`",
+        color=color_int
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# Lệnh /point_edit dành cho Admin (Cộng hoặc trừ điểm) với giao diện đẹp mắt
+@client.tree.command(name="point_edit", description="[Admin] Cộng hoặc trừ điểm của một người chơi")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    user="Thành viên cần thay đổi điểm",
+    amount="Số điểm cần cộng (ví dụ: 100) hoặc trừ (ví dụ: -50)"
+)
+async def point_edit(interaction: discord.Interaction, user: discord.Member, amount: int):
+    p = get_player(user.id)
+    if "points" not in p:
+        p["points"] = 0
+        
+    p["points"] += amount
+    if p["points"] < 0:
+        p["points"] = 0
+        
+    await save_player_async(user.id, p)
+    
+    is_add = amount > 0
+    action_icon = "📈" if is_add else "📉"
+    action_text = "Cộng điểm" if is_add else "Trừ điểm"
+    abs_amount = abs(amount)
+    
+    embed = discord.Embed(
+        title=f"{action_icon} ─── QUẢN LÝ ĐIỂM HỆ THỐNG ─── {action_icon}",
+        description=(
+            f"👤 **Thành viên:** {user.mention}\n"
+            f"⚡ **Hành động:** `{action_text} ({'+' if is_add else '-'}{abs_amount:,} điểm})`\n"
+            f"💰 **Tổng điểm hiện tại:** `{p['points']:,}` điểm"
+        ),
+        color=0x2ECC71 if is_add else 0xE74C3C
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # --- 3. LỆNH /bangxephang VÀ TỰ ĐỘNG CẬP NHẬT KÊNH ---
@@ -1071,7 +1266,6 @@ active_lb_channels = set()
 
 def generate_leaderboard_embed():
     all_players = []
-    # Đảm bảo biến `db` khớp với từ điển lưu trữ dữ liệu người chơi của bot bạn
     for uid, data in db.items():
         all_players.append((int(uid), data.get("points", 0)))
     
@@ -1079,22 +1273,35 @@ def generate_leaderboard_embed():
     top_10 = all_players[:10]
 
     embed = discord.Embed(
-        title="🏆 ─── BẢNG XẾP HẠNG ĐẠI HẢI TRÌNH ─── 🏆",
-        description="Hệ thống cập nhật tự động hàng ngày lúc **06:00 sáng** và trao giải vào **cuối tuần**!",
-        color=0xF39C12
+        title="⚡ ─── BẢNG XẾP HẠNG ĐẠI HẢI TRÌNH ─── ⚡",
+        description="🌟 *Hệ thống tự động cập nhật hàng ngày lúc* **06:00 sáng** *và vinh danh trao giải vào* **Chủ Nhật hàng tuần**!",
+        color=0xF1C40F
     )
 
     desc_list = []
     for index, (uid, pts) in enumerate(top_10, start=1):
-        medal = "👑" if index == 1 else "🥈" if index == 2 else "🥉" if index == 3 else f"`#{index}`"
+        # Hệ thống icon huy hiệu cực kỳ bắt mắt cho từng thứ hạng
+        if index == 1:
+            rank_icon = "👑"
+        elif index == 2:
+            rank_icon = "🥈"
+        elif index == 3:
+            rank_icon = "🥉"
+        else:
+            rank_icon = f"🔹 `#{index:02d}`"
         
         title_display = ""
         if index in TOP_CONFIG:
-            title_display = f" | 🏷️ **{TOP_CONFIG[index]['title']}**"
+            title_display = f" | 🏷️ **[{TOP_CONFIG[index]['title']}]**"
 
-        desc_list.append(f"{medal} <@{uid}> — **{pts:,} điểm**{title_display}")
+        desc_list.append(f"{rank_icon} ── {user_mention := f'<@{uid}>'} ── 🪙 **{pts:,} pts**{title_display}")
 
-    embed.add_field(name="Top Cao Thủ", value="\n".join(desc_list) if desc_list else "Chưa có dữ liệu xếp hạng.", inline=False)
+    embed.add_field(
+        name="🏆 DANH SÁCH CAO THỦ TOP 10", 
+        value="\n".join(desc_list) if desc_list else "📭 *Chưa có dữ liệu xếp hạng trong hệ thống.*", 
+        inline=False
+    )
+    embed.set_footer(text="💡 Tích cực Chat (15 pts) và tham gia Voice (20 pts/phút) để vươn lên dẫn đầu!")
     return embed
 
 @client.tree.command(name="bangxephang", description="Xem bảng xếp hạng điểm số toàn server")
@@ -1121,7 +1328,7 @@ async def daily_leaderboard_task():
             try:
                 channel = client.get_channel(channel_id)
                 if channel:
-                    await channel.send("⏰ **Bảng xếp hạng đã được cập nhật tự động lúc 06:00 sáng!**", embed=embed)
+                    await channel.send("📢 **[THÔNG BÁO TỰ ĐỘNG]** Bảng xếp hạng đại hải trình đã được làm mới lúc **06:00 sáng**!", embed=embed)
             except Exception:
                 pass
 
@@ -1136,6 +1343,8 @@ async def weekly_reset_task():
                 for rank_idx, (uid, pts) in enumerate(all_players[:3], start=1):
                     p = get_player(int(uid))
                     earned_title = TOP_CONFIG[rank_idx]["title"]
+                    if "titles" not in p:
+                        p["titles"] = []
                     if earned_title not in p["titles"]:
                         p["titles"].append(earned_title)
                     p["equipped_title"] = earned_title
@@ -1146,7 +1355,7 @@ async def weekly_reset_task():
                     try:
                         channel = client.get_channel(channel_id)
                         if channel:
-                            await channel.send("🎉 **Hệ thống đã tổng kết BXH cuối tuần và trao danh hiệu độc quyền cho Top 3 thành công!**")
+                            await channel.send("🎉 **[VINH DANH CUỐI TUẦN]** Hệ thống đã tổng kết BXH và trao thưởng danh hiệu độc quyền thành công cho **Top 3 cao thủ** xuất sắc nhất!")
                     except Exception:
                         pass
         
