@@ -701,6 +701,7 @@ class TowerMainView(discord.ui.View):
 
 @bot.tree.command(name="leothap", description="Khiêu chiến Tháp Vô Tận để cày EXP Pet và Điểm")
 @app_commands.describe(tang="Chọn số tầng tháp muốn khiêu chiến")
+@app_commands.checks.cooldown(1, 3, key=lambda i: i.user.id)
 async def leothap(interaction: discord.Interaction, tang: int):
     user_id = interaction.user.id
 
@@ -766,13 +767,17 @@ async def leothap(interaction: discord.Interaction, tang: int):
         # CHIẾN THẮNG
         update_points(user_id, b_pts)
 
-        # Cộng EXP và kiểm tra Thăng cấp
+        # Cộng EXP và kiểm tra Thăng cấp (Hỗ trợ thăng nhiều cấp liên tục bằng vòng lặp while)
         new_exp = p_exp + b_exp
-        req_exp = get_next_exp_req(p_type, p_lvl)
         new_lvl = p_lvl
-        if new_exp >= req_exp:
-            new_lvl += 1
-            new_exp -= req_exp
+        
+        while True:
+            req_exp = get_next_exp_req(p_type, new_lvl)
+            if new_exp >= req_exp:
+                new_exp -= req_exp
+                new_lvl += 1
+            else:
+                break
 
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
@@ -793,9 +798,10 @@ async def leothap(interaction: discord.Interaction, tang: int):
 
         embed.color = discord.Color.green()
         embed.add_field(name="🎉 KẾT QUẢ: CHIẾN THẮNG!", value=f"Bạn đã tiêu diệt **{b_name}**!\n\n**Phần thưởng:**\n• +**{b_pts}** Điểm\n• +**{b_exp}** EXP Linh Thú {title_msg}", inline=False)
+        
         if new_lvl > p_lvl:
             new_display, _ = get_pet_info_display(p_type, new_lvl)
-            embed.add_field(name="🎊 LINH THÚ THĂNG CẤP!", value=f"**{p_name}** đã tiến hóa/thăng cấp lên **{new_display}** (Level {new_lvl})!", inline=False)
+            embed.add_field(name="🎊 LINH THÚ THĂNG CẤP!", value=f"**{p_name}** đã thăng cấp lên **{new_display}** (Level **{new_lvl}**)!", inline=False)
     else:
         # THẤT BẠI
         embed.color = discord.Color.red()
