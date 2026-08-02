@@ -804,7 +804,7 @@ async def leothap(interaction: discord.Interaction, tang: int):
     await interaction.response.send_message(embed=embed, view=TowerMainView(user_id))
 
 # ==========================================
-# HỆ THỐNG /causong (CHỌN CẦN & MỒI + TÍCH HỢP TÚI ĐỒ)
+# HỆ THỐNG /causong (CHỌN CẦN & MỒI + TÍCH HỢP TÚI ĐỒ CHUẨN XÁC)
 # ==========================================
 
 DEFAULT_FISHES = [
@@ -888,12 +888,13 @@ class SelectRodDropdown(discord.ui.Select):
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         if chosen_rod != "none":
-            # Gỡ tất cả cần cũ, set cần mới thành is_equipped = 1
             c.execute("UPDATE inventory SET is_equipped = 0 WHERE user_id = ? AND (item_name LIKE '%Cần%' or item_name LIKE '%cần%')", (self.user_id,))
             c.execute("UPDATE inventory SET is_equipped = 1 WHERE user_id = ? AND item_name = ?", (self.user_id, chosen_rod))
             conn.commit()
             msg = f"🛡️ Đã chọn và trang bị thành công: **{chosen_rod}**!"
         else:
+            c.execute("UPDATE inventory SET is_equipped = 0 WHERE user_id = ? AND (item_name LIKE '%Cần%' or item_name LIKE '%cần%')", (self.user_id,))
+            conn.commit()
             msg = "⚠️ Bạn đang câu tay không (không dùng cần)."
         conn.close()
         await interaction.response.send_message(msg, ephemeral=True)
@@ -903,20 +904,21 @@ class SelectRodView(discord.ui.View):
         super().__init__(timeout=60)
         self.add_item(SelectRodDropdown(user_id))
 
-# Menu chọn Mồi Câu từ túi đồ (Tiêu hao 1 cái khi dùng)
+# Menu chọn Mồi Câu từ túi đồ (Dạng trang bị, không trừ điểm ngay khi chọn)
 class SelectBaitDropdown(discord.ui.Select):
     def __init__(self, user_id):
         self.user_id = user_id
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
-        c.execute("SELECT item_name, quantity FROM inventory WHERE user_id = ? AND (item_name LIKE '%Mồi%' or item_name LIKE '%mồi%')", (user_id,))
+        c.execute("SELECT item_name, quantity, is_equipped FROM inventory WHERE user_id = ? AND (item_name LIKE '%Mồi%' or item_name LIKE '%mồi%')", (user_id,))
         baits = c.fetchall()
         conn.close()
 
         options = []
         for b in baits:
-            name, qty = b
-            options.append(discord.SelectOption(label=f"{name} (x{qty})", value=name, emoji="🪱"))
+            name, qty, eq = b
+            status = " [Đang dùng]" if eq == 1 else ""
+            options.append(discord.SelectOption(label=f"{name} (x{qty}){status}", value=name, emoji="🪱"))
         
         if not options:
             options.append(discord.SelectOption(label="Không có mồi câu nào trong túi", value="none", emoji="❌"))
@@ -930,13 +932,13 @@ class SelectBaitDropdown(discord.ui.Select):
         
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
-        # Trừ 1 số lượng mồi trong túi đồ
-        c.execute("UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND item_name = ?", (self.user_id, chosen_bait))
-        c.execute("DELETE FROM inventory WHERE user_id = ? AND item_name = ? AND quantity <= 0", (self.user_id, chosen_bait))
+        # Set mồi này thành đang trang bị (is_equipped = 1), gỡ các mồi khác
+        c.execute("UPDATE inventory SET is_equipped = 0 WHERE user_id = ? AND (item_name LIKE '%Mồi%' or item_name LIKE '%mồi%')", (self.user_id,))
+        c.execute("UPDATE inventory SET is_equipped = 1 WHERE user_id = ? AND item_name = ?", (self.user_id, chosen_bait))
         conn.commit()
         conn.close()
 
-        await interaction.response.send_message(f"🪱 Đã gắn mồi **{chosen_bait}** vào lưỡi câu! (Đã tiêu thụ 1 cái từ túi đồ).", ephemeral=True)
+        await interaction.response.send_message(f"🪱 Đã gắn mồi **{chosen_bait}}** vào lưỡi câu! Sẵn sàng thả mồi.", ephemeral=True)
 
 class SelectBaitView(discord.ui.View):
     def __init__(self, user_id):
@@ -954,70 +956,106 @@ class FishingView(discord.ui.View):
             return await interaction.response.send_message("❌ Bảng này không phải của bạn!", ephemeral=True)
 
         base_success_rate = 0.45
-
-        # Lấy trang bị đang active từ túi đồ
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
-        c.execute("SELECT item_name FROM inventory WHERE user_id = ? AND is_equipped = 1", (self.user_id,))
-        equipped_items = [r[0] for r in c.fetchall()]
-        conn.close()
-
-        # Tính buff tỷ lệ thành công từ Cần & Mồi đang có trong túi/trang bị
         bonus_success = 0.0
         bonus_mythic_rate = 0.0
-        
-        # Kiểm tra qua các loại mồi/cần (hỗ trợ cả khi có trong kho hoặc đang cầm)
-        all_user_items = [r[0] for r in sqlite3.connect(DB_NAME).cursor().execute("SELECT item_name FROM inventory WHERE user_id = ?", (self.user_id,)).fetchall()]
 
-        if "Mồi cánh gió" in equipped_items or "Mồi cánh gió" in all_user_items: bonus_success += 0.05
-        if "Mồi sao" in equipped_items or "Mồi sao" in all_user_items: bonus_success += 0.10
-        if "Mồi mặt trăng" in equipped_items or "Mồi mặt trăng" in all_user_items:
-            bonus_success -= 0.30
-            bonus_mythic_rate += 0.10
-        if "Mồi susanoo" in equipped_items or "Mồi susanoo" in all_user_items: bonus_success += 0.20
-        if "Mồi mắt Gorgon" in equipped_items or "Mồi mắt Gorgon" in all_user_items: bonus_success += 0.50
-        if "Mồi cá voi xanh" in equipped_items or "Mồi cá voi xanh" in all_user_items: bonus_success += 0.02
-        if "Mồi tinh cầu" in equipped_items or "Mồi tinh cầu" in all_user_items: bonus_success += 0.50
-        if "Mồi nàng tiên cá" in equipped_items or "Mồi nàng tiên cá" in all_user_items: bonus_success += 0.40
-        if "Mồi may mắn" in equipped_items or "Mồi may mắn" in all_user_items:
-            if random.random() <= 0.5: bonus_success += 1.0
-            else: bonus_success -= 1.0
+        # Lấy toàn bộ trang bị đang active (is_equipped = 1) và liên kết với shop_items để đọc hiệu ứng động
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("""
+            SELECT i.id, i.item_name, i.quantity, s.effect_type, s.effect_value 
+            FROM inventory i 
+            LEFT JOIN shop_items s ON i.item_name = s.name 
+            WHERE i.user_id = ? AND i.is_equipped = 1
+        """, (self.user_id,))
+        equipped_items = c.fetchall()
 
-        if "Cần lửa" in equipped_items: bonus_success += 0.03
-        if "Cần băng" in equipped_items: bonus_success += 0.05
-        if "Cần quỷ" in equipped_items: bonus_success += 0.09
-        if "Cần vua" in equipped_items: bonus_success += 0.15
+        # Xử lý tính buff động từ Cần và Mồi đang trang bị
+        equipped_bait_id = None
+        for inv_id, item_name, qty, effect_type, effect_value in equipped_items:
+            val = float(effect_value) if effect_value else 0.0
+            lower_name = item_name.lower()
+
+            # Nếu là Mồi câu -> tiêu hao 1 cái khi bấm thả câu
+            if "mồi" in lower_name or effect_type == "bait":
+                equipped_bait_id = inv_id
+                # Áp dụng tỷ lệ buff linh hoạt dựa trên giá trị cấu hình trong shop hoặc tên
+                if "cánh gió" in lower_name: bonus_success += 0.05
+                elif "sao" in lower_name: bonus_success += 0.10
+                elif "mặt trăng" in lower_name:
+                    bonus_success -= 0.30
+                    bonus_mythic_rate += 10.0 # Tăng % ra thần thoại
+                elif "susanoo" in lower_name: bonus_success += 0.20
+                elif "gorgon" in lower_name: bonus_success += 0.50
+                elif "cá voi xanh" in lower_name: bonus_success += 0.02
+                elif "tinh cầu" in lower_name: bonus_success += 0.50
+                elif "nàng tiên cá" in lower_name: bonus_success += 0.40
+                elif "may mắn" in lower_name:
+                    if random.random() <= 0.5: bonus_success += 1.0
+                    else: bonus_success -= 1.0
+                else:
+                    # Mồi tự do khác lấy trực tiếp từ effect_value của shop (chia 100 nếu tính theo %)
+                    bonus_success += val / 100.0
+
+            # Nếu là Cần câu
+            elif "cần" in lower_name or effect_type == "rod":
+                if "lửa" in lower_name: bonus_success += 0.03
+                elif "băng" in lower_name: bonus_success += 0.05
+                elif "quỷ" in lower_name: bonus_success += 0.09
+                elif "vua" in lower_name: bonus_success += 0.15
+                else:
+                    bonus_success += val / 100.0
+
+        # Tiến hành trừ 1 số lượng mồi đang dùng trong kho
+        if equipped_bait_id:
+            c.execute("SELECT quantity FROM inventory WHERE id = ?", (equipped_bait_id,))
+            q_row = c.fetchone()
+            if q_row:
+                current_q = q_row[0]
+                if current_q <= 1:
+                    c.execute("DELETE FROM inventory WHERE id = ?", (equipped_bait_id,))
+                else:
+                    c.execute("UPDATE inventory SET quantity = quantity - 1 WHERE id = ?", (equipped_bait_id,))
+
+        conn.commit()
 
         final_success_rate = max(0.05, min(1.0, base_success_rate + bonus_success))
 
         # Kiểm tra đứt dây câu (Thất bại)
         if random.random() > final_success_rate:
+            conn.close()
             embed_fail = discord.Embed(
                 title="💔 RẤT TIẾC - ĐỨT DÂY CÂU!",
-                description="Cá cắn câu quá mạnh làm đứt dây câu mất rồi! Hãy thử lại vận may lần sau nhé.",
+                description="Cá cắn câu quá mạnh làm đứt dây câu mất rồi! Mồi đã tiêu hao, hãy thử lại vận may lần sau nhé.",
                 color=discord.Color.red()
             )
             return await interaction.response.send_message(embed=embed_fail)
 
-        # Câu thành công -> Lấy danh sách cá từ Database
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
+        # Câu thành công -> Lấy danh sách cá từ Database và dùng thuật toán Weighted Random chuẩn xác
         c.execute("SELECT name, rarity, rate, points, title FROM fishes")
         all_fishes = c.fetchall()
         conn.close()
 
-        selected_fish = None
-        random.shuffle(all_fishes)
+        weighted_fishes = []
+        total_weight = 0
         for f in all_fishes:
             f_name, f_rarity, f_rate, f_pts, f_title = f
             calc_rate = f_rate
-            if f_rarity == "thần thoại": calc_rate += bonus_mythic_rate * 100
-            if random.uniform(0, 100) <= calc_rate:
+            if f_rarity == "thần thoại": 
+                calc_rate += bonus_mythic_rate
+            
+            weighted_fishes.append((f, max(0.0001, calc_rate)))
+            total_weight += max(0.0001, calc_rate)
+
+        # Quay số ngẫu nhiên theo tổng trọng số tỷ lệ
+        pick = random.uniform(0, total_weight)
+        current = 0
+        selected_fish = all_fishes[0]
+        for f, rate in weighted_fishes:
+            current += rate
+            if pick <= current:
                 selected_fish = f
                 break
-
-        if not selected_fish:
-            selected_fish = all_fishes[0]
 
         f_name, f_rarity, f_rate, f_pts, f_title = selected_fish
 
@@ -1028,7 +1066,8 @@ class FishingView(discord.ui.View):
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
             c.execute("SELECT titles FROM users WHERE user_id = ?", (self.user_id,))
-            curr_titles = c.fetchone()[0] or ""
+            row_t = c.fetchone()
+            curr_titles = row_t[0] if row_t and row_t[0] else ""
             if f_title not in curr_titles:
                 updated_titles = f"{curr_titles}, {f_title}".strip(", ")
                 c.execute("UPDATE users SET titles = ? WHERE user_id = ?", (updated_titles, self.user_id))
@@ -1311,7 +1350,7 @@ class InventorySelect(discord.ui.Select):
             conn.close()
             return await interaction.response.send_message(msg, ephemeral=True)
 
-        # --- NHÓM 2: THỨC ĂN / BỒI BỔ CHO PET (Tiêu thụ để tăng EXP) ---
+        # --- NHÓM 2: THỨC ĂN / BỒI BỔ CHO PET (Tiêu thụ để tăng EXP & Tự động thăng cấp) ---
         is_food_item = (
             "đào" in item_name.lower() or 
             "thảo quả" in item_name.lower() or 
@@ -1329,14 +1368,34 @@ class InventorySelect(discord.ui.Select):
             else:
                 c.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
             
-            c.execute("SELECT id, level FROM user_pets WHERE user_id = ? AND is_active = 1", (user_id,))
+            # Lấy thêm pet_type để tính mốc exp tiến hóa chuẩn xác
+            c.execute("SELECT id, pet_type, level, exp FROM user_pets WHERE user_id = ? AND is_active = 1", (user_id,))
             active_pet = c.fetchone()
             
             if active_pet:
-                pet_id = active_pet[0]
-                exp_gain = int(effect_value) if effect_value > 0 else 150
-                c.execute("UPDATE user_pets SET exp = exp + ? WHERE id = ?", (exp_gain, pet_id))
-                msg = f"✨ Bạn đã cho linh thú xuất trận ăn **{item_name}**, nhận thành công `+{exp_gain} EXP`!"
+                pet_id, pet_type, lvl, current_exp = active_pet
+                
+                # Lấy đúng số EXP thực tế từ shop (ví dụ 1100), nếu không có mới fallback về 150
+                exp_gain = int(effect_value) if effect_value and effect_value > 0 else 150
+                current_exp += exp_gain
+                
+                leveled_up = False
+                max_exp = get_next_exp_req(pet_type, lvl)
+                
+                # Vòng lặp kiểm tra thăng cấp nếu EXP vượt ngưỡng
+                while current_exp >= max_exp:
+                    current_exp -= max_exp
+                    lvl += 1
+                    leveled_up = True
+                    max_exp = get_next_exp_req(pet_type, lvl)
+
+                c.execute("UPDATE user_pets SET level = ?, exp = ? WHERE id = ?", (lvl, current_exp, pet_id))
+                new_pet_name, _ = get_pet_info_display(pet_type, lvl)
+                
+                if leveled_up:
+                    msg = f"🎉 Tuyệt vời! Linh thú ăn **{item_name}** (`+{exp_gain} EXP`) và tiến hóa thành **{new_pet_name} (Level {lvl})** thành công!"
+                else:
+                    msg = f"✨ Bạn đã cho linh thú xuất trận ăn **{item_name}**, nhận thành công `+{exp_gain} EXP`!"
             else:
                 msg = f"✨ Đã tiêu thụ **{item_name}**, nhưng bạn chưa chọn linh thú xuất trận (`/nuoithu`) nên pet không nhận được EXP!"
             
@@ -1364,43 +1423,6 @@ class InventorySelect(discord.ui.Select):
         conn.close()
 
         await interaction.response.send_message(msg, ephemeral=True)
-
-class InventoryView(discord.ui.View):
-    def __init__(self, items):
-        super().__init__(timeout=180)
-        if items:
-            self.add_item(InventorySelect(items))
-
-@bot.tree.command(name="tuido", description="Xem Điểm, Danh hiệu, Vật phẩm & Sử dụng đồ từ túi")
-async def tuido(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    u_data = get_user(user_id)
-
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT item_name, quantity, is_equipped FROM inventory WHERE user_id = ?", (user_id,))
-    inv_items = c.fetchall()
-    conn.close()
-
-    embed = discord.Embed(title=f"🎒 TÚI ĐỒ CỦA {interaction.user.display_name.upper()}", color=discord.Color.dark_gold())
-    embed.add_field(name="💰 Số Điểm Hiện Có", value=f"`{u_data['points']}` Điểm", inline=True)
-    embed.add_field(name="🏆 Danh Hiệu Sở Hữu", value=f"`{u_data['titles'] or 'Chưa có'}`", inline=True)
-
-    view = None
-    if inv_items:
-        inv_str = ""
-        for name, qty, eq in inv_items:
-            eq_status = " 🟢 [ĐANG TRANG BỊ]" if eq == 1 else ""
-            inv_str += f"• **{name}** x{qty}{eq_status}\n"
-        embed.add_field(name="📦 Vật Phẩm Trong Kho", value=inv_str[:1024], inline=False)
-        view = InventoryView(inv_items)
-    else:
-        embed.add_field(name="📦 Vật Phẩm Trong Kho", value="*Túi đồ của bạn đang trống! Hãy ghé /shop để mua sắm.*", inline=False)
-
-    if view:
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-    else:
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ==========================================
 # 9. CÁC LỆNH MINI-GAME & TƯƠNG TÁC (/cuop, /taixiu)
