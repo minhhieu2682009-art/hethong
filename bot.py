@@ -1285,7 +1285,7 @@ async def shop(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ShopMainView())
 
 # ==========================================
-# LỆNH /TUIDO & GIAO DIỆN TÚI ĐỒ
+# PHẦN TÚI ĐỒ & SỬ DỤNG VẬT PHẨM (HOÀN CHỈNH)
 # ==========================================
 
 class InventorySelect(discord.ui.Select):
@@ -1308,11 +1308,11 @@ class InventorySelect(discord.ui.Select):
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         
-        # 1. Lấy thông tin từ shop_items
+        # 1. Lấy thông tin từ shop_items để biết phân loại và hiệu ứng
         c.execute("SELECT category, effect_type, effect_value FROM shop_items WHERE name = ?", (item_name,))
         shop_info = c.fetchone()
         
-        # 2. Kiểm tra kho đồ
+        # 2. Kiểm tra kho đồ của người chơi
         c.execute("SELECT id, quantity, is_equipped FROM inventory WHERE user_id = ? AND item_name = ?", (user_id, item_name))
         inv_row = c.fetchone()
 
@@ -1326,7 +1326,7 @@ class InventorySelect(discord.ui.Select):
         effect_type = shop_info[1].lower() if shop_info and shop_info[1] else "none"
         raw_effect_val = shop_info[2] if shop_info and shop_info[2] is not None else 0
 
-        # Ép kiểu an toàn cho effect_value
+        # Ép kiểu an toàn cho effect_value tránh lỗi so sánh str và int
         try:
             effect_value = float(raw_effect_val)
         except (ValueError, TypeError):
@@ -1334,7 +1334,7 @@ class InventorySelect(discord.ui.Select):
 
         msg = ""
 
-        # --- NHÓM 1: TRANG BỊ / CẦN CÂU ---
+        # --- NHÓM 1: CẦN CÂU HOẶC TRANG BỊ (Mặc / Tháo đổi trạng thái is_equipped) ---
         is_equipment_item = (
             "cần" in item_name.lower() or 
             "kiếm" in item_name.lower() or 
@@ -1362,7 +1362,7 @@ class InventorySelect(discord.ui.Select):
             conn.close()
             return await interaction.response.send_message(msg, ephemeral=True)
 
-        # --- NHÓM 2: THỨC ĂN CHO PET ---
+        # --- NHÓM 2: THỨC ĂN / BỒI BỔ CHO PET (Tiêu thụ để tăng EXP chính xác từ Shop & Tự động thăng cấp) ---
         is_food_item = (
             "đào" in item_name.lower() or 
             "thảo quả" in item_name.lower() or 
@@ -1380,17 +1380,21 @@ class InventorySelect(discord.ui.Select):
             else:
                 c.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
             
+            # Lấy thêm pet_type để tính mốc exp tiến hóa chuẩn xác
             c.execute("SELECT id, pet_type, level, exp FROM user_pets WHERE user_id = ? AND is_active = 1", (user_id,))
             active_pet = c.fetchone()
             
             if active_pet:
                 pet_id, pet_type, lvl, current_exp = active_pet
+                
+                # Lấy đúng số EXP thực tế từ shop, nếu không có mới fallback về 150
                 exp_gain = int(effect_value) if effect_value > 0 else 150
                 current_exp += exp_gain
                 
                 leveled_up = False
                 max_exp = get_next_exp_req(pet_type, lvl)
                 
+                # Vòng lặp kiểm tra thăng cấp nếu EXP vượt ngưỡng
                 while current_exp >= max_exp:
                     current_exp -= max_exp
                     lvl += 1
@@ -1411,7 +1415,7 @@ class InventorySelect(discord.ui.Select):
             conn.close()
             return await interaction.response.send_message(msg, ephemeral=True)
 
-        # --- NHÓM 3: VẬT PHẨM KHÁC ---
+        # --- NHÓM 3: VẬT PHẨM TIÊU HAO KHÁC ---
         new_qty = current_qty - 1
         if new_qty <= 0:
             c.execute("DELETE FROM inventory WHERE id = ?", (inv_id,))
@@ -1444,15 +1448,39 @@ async def tuido(interaction: discord.Interaction):
     user_id = interaction.user.id
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    
+    # Lấy thông tin điểm số của người dùng
+    c.execute("SELECT points FROM users WHERE user_id = ?", (user_id,))
+    user_data = c.fetchone()
+    points = user_data[0] if user_data else 0
+
+    # Lấy danh sách vật phẩm trong kho
     c.execute("SELECT item_name, quantity, is_equipped FROM inventory WHERE user_id = ?", (user_id,))
     items = c.fetchall()
     conn.close()
 
+    # Tạo giao diện Embed chuẩn phong cách game
+    embed = discord.Embed(
+        title=f"🎒 TÚI ĐỒ CỦA {interaction.user.display_name.upper()} ❗",
+        color=discord.Color.gold()
+    )
+    
+    embed.add_field(name="💰 Số Điểm Hiện Có", value=f"`{points}` Điểm", inline=True)
+    embed.add_field(name="🏆 Danh Hiệu Sở Hữu", value="`Chưa có`", inline=True)
+
     if not items:
-        return await interaction.response.send_message("📦 Túi đồ của bạn đang trống rỗng! Hãy mua vật phẩm ở cửa hàng trước nhé.", ephemeral=True)
+        embed.add_field(name="📦 Vật Phẩm Trong Kho", value="*Túi đồ của bạn đang trống rỗng!*", inline=False)
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    item_list_str = ""
+    for name, qty, eq in items:
+        eq_text = " 🟢 [Đang trang bị]" if eq == 1 else ""
+        item_list_str += f"• 📦 **{name}** x{qty}{eq_text}\n"
+
+    embed.add_field(name="📦 Vật Phẩm Trong Kho", value=item_list_str, inline=False)
 
     view = InventoryView(items)
-    await interaction.response.send_message("📦 **TÚI ĐỒ CỦA BẠN**\nChọn vật phẩm bên dưới để sử dụng hoặc trang bị:", view=view, ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 # ==========================================
 # 9. CÁC LỆNH MINI-GAME & TƯƠNG TÁC (/cuop, /taixiu)
