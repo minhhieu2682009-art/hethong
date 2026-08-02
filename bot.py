@@ -1253,7 +1253,7 @@ async def point_edit(interaction: discord.Interaction, user: discord.Member, amo
         title=f"{action_icon} ─── QUẢN LÝ ĐIỂM HỆ THỐNG ─── {action_icon}",
         description=(
             f"👤 **Thành viên:** {user.mention}\n"
-            f"⚡ **Hành động:** `{action_text} ({'+' if is_add else '-'}{abs_amount:,} điểm})`\n"
+            f"⚡ **Hành động:** `{action_text} ({'+' if is_add else '-'}{abs_amount:,} điểm)`\n"
             f"💰 **Tổng điểm hiện tại:** `{p['points']:,}` điểm"
         ),
         color=0x2ECC71 if is_add else 0xE74C3C
