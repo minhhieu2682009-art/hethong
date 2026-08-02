@@ -1134,15 +1134,15 @@ class FishingView(discord.ui.View):
             conn.close()
 
         pts_str = f"+{f_pts}" if f_pts >= 0 else f"{f_pts}"
-    embed_win = discord.Embed(
-        title="🎣 CÂU CÁ THÀNH CÔNG!",
-        description=f"🎉 Chúc mừng {interaction.user.mention} đã xuất sắc giật cần và bắt được:\n\n"
-                    f"### {f_name}\n"
-                    f"* **Phẩm cấp:** {f_rarity.upper()}\n"
-                    f"* **Phần thưởng:** `{pts_str}` Điểm {title_msg}",
-        color=discord.Color.blue()
-    )
-    await interaction.response.send_message(embed=embed_win)
+        embed_win = discord.Embed(
+            title="🎣 CÂU CÁ THÀNH CÔNG!",
+            description=f"🎉 Chúc mừng {interaction.user.mention} đã xuất sắc giật cần và bắt được:\n\n"
+                        f"### {f_name}\n"
+                        f"* **Phẩm cấp:** {f_rarity.upper()}\n"
+                        f"* **Phần thưởng:** `{pts_str}` Điểm {title_msg}",
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed_win)
 
     @discord.ui.button(label="🎣 Chọn Cần Câu", style=discord.ButtonStyle.secondary, custom_id="btn_select_rod")
     async def select_rod_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1171,7 +1171,7 @@ async def causong(interaction: discord.Interaction):
     )
     view = FishingView(user_id=interaction.user.id)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
+    
 # ==========================================
 # 8. HỆ THỐNG /shop & TÚI ĐỒ /tuido
 # ==========================================
