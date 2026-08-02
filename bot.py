@@ -80,7 +80,14 @@ async def save_player_async(user_id, p):
   async with db_lock:
     cursor.execute(
         "UPDATE players SET points=?, pet=?, inventory=?, titles=?, equipped_title=? WHERE user_id=?",
-        (p["points"], str(p["pet"]) if p["pet"] else None, str(p["inventory"]), str(p["titles"]), p["equipped_title"], user_id),
+        (
+            p.get("points", 0), 
+            str(p.get("pet")) if p.get("pet") else None, 
+            str(p.get("inventory", [])), 
+            str(p.get("titles", [])), 
+            p.get("equipped_title"), 
+            user_id
+        ),
     )
     db.commit()
 
