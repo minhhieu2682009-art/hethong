@@ -487,6 +487,16 @@ class PVPConfirmView(discord.ui.View):
             return await interaction.response.send_message("❌ Bạn không phải là người được thách đấu!", ephemeral=True)
         await interaction.response.edit_message(content=f"❌ {self.target.mention} đã từ chối lời thách đấu!", embed=None, view=None)
 
+import os
+import json
+import time
+import random
+import sqlite3
+import discord
+from discord import app_commands
+from discord.ext import commands, tasks
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 # ==========================================
 # C. FISHING SYSTEM (/causong)
 # ==========================================
@@ -496,22 +506,35 @@ class FishingView(discord.ui.View):
 
     @discord.ui.button(label="🎣 Câu Cá", style=discord.ButtonStyle.primary, custom_id="btn_do_fishing")
     async def do_fish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user = db_get_user(interaction.user.id)
+        user_id = interaction.user.id
+        user = db_get_user(user_id)
+        inv = db_get_inventory(user_id)
         
-        base_success = 0.45
-        rod_id = user.get("equipped_rod")
         bait_id = user.get("equipped_bait")
+        rod_id = user.get("equipped_rod")
 
+        # Kiểm tra mồi câu trong túi đồ
+        if bait_id:
+            if inv.get(bait_id, 0) <= 0:
+                # Tự động tháo mồi nếu đã hết
+                db_update_user(user_id, equipped_bait=None)
+                return await interaction.response.send_message("❌ Bạn đã hết mồi câu đang trang bị! Vui lòng mua hoặc trang bị mồi mới.", ephemeral=True)
+            # Trừ 1 mồi câu khi sử dụng
+            db_add_inventory(user_id, bait_id, -1)
+
+        base_success = 0.45
         bonus_success = 0
         bonus_rare = 0
         bonus_epic = 0
         bonus_myth = 0
 
+        # Chỉ số Cần Câu
         if rod_id == "r4": bonus_success += 0.03
         elif rod_id == "r5": bonus_success += 0.05; bonus_epic += 0.04
         elif rod_id == "r6": bonus_success += 0.09; bonus_myth += 0.10
         elif rod_id == "r7": bonus_success += 0.15; bonus_myth += 0.15
 
+        # Chỉ số Mồi Câu
         if bait_id == "b1": pass
         elif bait_id == "b2": bonus_success += 0.10; bonus_rare += 0.10
         elif bait_id == "b3": bonus_success -= 0.30; bonus_myth += 0.10
@@ -528,10 +551,16 @@ class FishingView(discord.ui.View):
 
         total_success = max(0.05, min(1.0, base_success + bonus_success))
 
+        # Xử lý khi giật thất bại
         if random.random() > total_success:
-            embed = discord.Embed(title="🎣 CÂU CÁ THẤT BẠI!", description="💥 Rất tiếc, dây câu của bạn đã bị đứt!", color=discord.Color.dark_grey())
+            embed = discord.Embed(
+                title="🎣 CÂU CÁ THẤT BẠI!", 
+                description="💥 Rất tiếc, dây câu của bạn đã bị đứt!", 
+                color=discord.Color.dark_grey()
+            )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
+        # Danh sách Cá mặc định
         fishes = [
             {"name": "🐟 Cá Rô Đồng", "type": "Thường", "pts": 10, "rate": 50},
             {"name": "🐠 Cá Chép Vàng", "type": "Thường", "pts": 10, "rate": 50},
@@ -550,6 +579,7 @@ class FishingView(discord.ui.View):
             {"name": "🌑 Chân thiên tôn", "type": "Hư vô", "pts": 3000, "rate": 0.001, "title": "Thiên tôn"}
         ]
 
+        # Lấy thêm cá tùy chỉnh từ config
         custom_fish = get_config("custom_fish", [])
         for cf in custom_fish:
             fishes.append({"name": cf["name"], "type": cf["rarity"], "pts": cf["pts"], "rate": cf["rate"], "title": cf.get("title")})
@@ -557,7 +587,7 @@ class FishingView(discord.ui.View):
         caught = random.choices(fishes, weights=[f["rate"] for f in fishes], k=1)[0]
         
         new_pts = user["points"] + caught["pts"]
-        db_update_user(interaction.user.id, points=new_pts)
+        db_update_user(user_id, points=new_pts)
 
         msg = f"Bạn đã câu được **{caught['name']}**!\n• **Phẩm cấp:** {caught['type']}\n• **Điểm:** {caught['pts']:+} điểm."
         
@@ -565,7 +595,7 @@ class FishingView(discord.ui.View):
         if "title" in caught and caught["title"]:
             if caught["title"] not in user_titles:
                 user_titles.append(caught["title"])
-                db_update_user(interaction.user.id, titles=json.dumps(user_titles, ensure_ascii=False))
+                db_update_user(user_id, titles=json.dumps(user_titles, ensure_ascii=False))
                 msg += f"\n🎉 **NHẬN DANH HIỆU MỚI:** [{caught['title']}]"
 
         embed = discord.Embed(title="🎣 CÂU CÁ THÀNH CÔNG!", description=msg, color=discord.Color.blue())
@@ -593,7 +623,13 @@ class AddFishModal(discord.ui.Modal, title="Thêm Cá Mới Vào Hồ"):
             return await interaction.response.send_message("❌ Tỉ lệ và điểm phải là số hợp lệ!", ephemeral=True)
 
         cfish = get_config("custom_fish", [])
-        cfish.append({"name": self.fish_name.value, "rarity": self.rarity.value, "rate": r_val, "pts": p_val, "title": self.title.value if self.title.value else None})
+        cfish.append({
+            "name": self.fish_name.value, 
+            "rarity": self.rarity.value, 
+            "rate": r_val, 
+            "pts": p_val, 
+            "title": self.title.value if self.title.value else None
+        })
         set_config("custom_fish", cfish)
 
         await interaction.response.send_message(f"✅ Đã thêm cá **{self.fish_name.value}** vào danh sách thành công!", ephemeral=True)
@@ -686,7 +722,13 @@ class AddShopItemModal(discord.ui.Modal, title="Thêm Vật Phẩm Vào Shop"):
         if st not in ["bait", "rod", "food", "equip"]:
             return await interaction.response.send_message("❌ Loại vật phẩm không hợp lệ!", ephemeral=True)
 
-        new_item = {"id": f"custom_{random.randint(1000, 9999)}", "name": self.item_name.value, "type": "Custom", "price": p_val, "desc": self.effect.value}
+        new_item = {
+            "id": f"custom_{random.randint(1000, 9999)}", 
+            "name": self.item_name.value, 
+            "type": "Custom", 
+            "price": p_val, 
+            "desc": self.effect.value
+        }
         DEFAULT_SHOP[st].append(new_item)
 
         await interaction.response.send_message(f"✅ Đã thêm **{self.item_name.value}** vào Cửa hàng!", ephemeral=True)
@@ -706,17 +748,20 @@ class InventoryPaginatedView(discord.ui.View):
 
     def get_page_embed(self):
         user = db_get_user(self.user_id)
-        embed = discord.Embed(title=f"🎒 TÚI ĐỒ CỦA {discord.utils.get(bot.users, id=int(self.user_id)).display_name}", color=discord.Color.blue())
+        user_obj = bot.get_user(int(self.user_id))
+        display_name = user_obj.display_name if user_obj else "Người chơi"
+        
+        embed = discord.Embed(title=f"🎒 TÚI ĐỒ CỦA {display_name}", color=discord.Color.blue())
         embed.add_field(name="💰 Điểm hiện có", value=f"**{user['points']}** điểm", inline=True)
 
-        # Equip status
+        # Trạng thái trang bị
         rod_name = next((r["name"] for r in DEFAULT_SHOP["rod"] if r["id"] == user["equipped_rod"]), "Chưa trang bị")
         bait_name = next((b["name"] for b in DEFAULT_SHOP["bait"] if b["id"] == user["equipped_bait"]), "Chưa trang bị")
         equip_name = next((e["name"] for e in DEFAULT_SHOP["equip"] if e["id"] == user["equipped_pet_item"]), "Chưa trang bị")
 
         embed.add_field(name="🛡️ Trang Bị Đang Kích Hoạt", value=f"• Cần câu: **{rod_name}**\n• Mồi câu: **{bait_name}**\n• Vật phẩm Pet: **{equip_name}**", inline=False)
 
-        # Pagination logic
+        # Phân trang
         start = self.page * self.items_per_page
         end = start + self.items_per_page
         current_keys = self.item_keys[start:end]
@@ -839,7 +884,7 @@ async def leothap(interaction: discord.Interaction):
         if final_player_cp >= floor["cp"]:
             db_update_user(inter.user.id, points=user["points"] + floor["reward_p"])
             
-            # Update Exp
+            # Cập nhật Exp
             new_exp = active_p["exp"] + floor["reward_exp"]
             conn = get_db()
             c = conn.cursor()
@@ -935,7 +980,7 @@ async def build_leaderboard_embed():
     return embed
 
 @bot.tree.command(name="cuop", description="Thực hiện phi vụ cướp điểm ngẫu nhiên")
-@app_commands.checks.cooldown(1, 30.0, key=lambda i: (i.guild_id, i.user.id)) # Anti-spam 30s
+@app_commands.checks.cooldown(1, 30.0, key=lambda i: (i.guild_id, i.user.id))
 async def cuop(interaction: discord.Interaction, target: discord.Member):
     if target.id == interaction.user.id:
         return await interaction.response.send_message("❌ Bạn không thể tự cướp chính mình!", ephemeral=True)
@@ -966,7 +1011,7 @@ async def cuop(interaction: discord.Interaction, target: discord.Member):
     app_commands.Choice(name="Tài 🎲", value="tai"),
     app_commands.Choice(name="Xỉu 🎲", value="xiu")
 ])
-@app_commands.checks.cooldown(1, 5.0, key=lambda i: (i.guild_id, i.user.id)) # Anti-spam 5s
+@app_commands.checks.cooldown(1, 5.0, key=lambda i: (i.guild_id, i.user.id))
 async def taixiu(interaction: discord.Interaction, amount: int, choice: app_commands.Choice[str]):
     user = db_get_user(interaction.user.id)
     if amount <= 0:
@@ -997,6 +1042,103 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     if isinstance(error, app_commands.CommandOnCooldown):
         await interaction.response.send_message(f"⏳ Thao tác quá nhanh! Vui lòng chờ `{error.retry_after:.1f}s` nữa để tiếp tục.", ephemeral=True)
 
+import os
+import json
+import time
+import sqlite3
+import discord
+from discord import app_commands
+from discord.ext import commands, tasks
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# ==========================================
+# 0. BOT & DATABASE INITIALIZATION
+# ==========================================
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+intents.voice_states = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+DB_PATH = "bot_data.db"
+
+def get_db():
+    # Thêm timeout=10.0 để tránh lỗi 'database is locked' khi chat và voice ghi đồng thời
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    # Bật chế độ WAL giúp vừa đọc vừa ghi dữ liệu mượt mà hơn
+    conn.execute("PRAGMA journal_mode=WAL;")
+    return conn
+
+def init_db():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            points INTEGER DEFAULT 0,
+            equipped_rod TEXT,
+            equipped_bait TEXT,
+            equipped_pet_item TEXT,
+            active_pet_idx INTEGER,
+            titles TEXT DEFAULT '[]'
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS config (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def get_config(key, default=None):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT value FROM config WHERE key = ?", (key,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        try:
+            return json.loads(row["value"])
+        except json.JSONDecodeError:
+            return row["value"]
+    return default
+
+def set_config(key, value):
+    conn = get_db()
+    c = conn.cursor()
+    val_str = json.dumps(value, ensure_ascii=False)
+    c.execute("INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?", (key, val_str, val_str))
+    conn.commit()
+    conn.close()
+
+def db_get_user(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    row = c.fetchone()
+    if not row:
+        c.execute("INSERT INTO users (user_id, points) VALUES (?, 1000)", (user_id,))
+        conn.commit()
+        c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        row = c.fetchone()
+    conn.close()
+    return dict(row)
+
+def db_update_user(user_id, **kwargs):
+    conn = get_db()
+    c = conn.cursor()
+    fields = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+    values = list(kwargs.values()) + [user_id]
+    c.execute(f"UPDATE users SET {fields} WHERE user_id = ?", values)
+    conn.commit()
+    conn.close()
+
 # ==========================================
 # G. ADMIN MANAGEMENT COMMANDS
 # ==========================================
@@ -1006,10 +1148,10 @@ async def point_edit(interaction: discord.Interaction, user: discord.Member, amo
         return await interaction.response.send_message("⛔ Bạn không có quyền thực hiện lệnh này!", ephemeral=True)
 
     u = db_get_user(user.id)
-    new_p = u["points"] + amount
+    new_p = max(0, u["points"] + amount) # Đảm bảo điểm không bị âm
     db_update_user(user.id, points=new_p)
 
-    await interaction.response.send_message(f"✅ Đã điều chỉnh điểm của {user.mention}: **{amount:+}** điểm (Tổng: {new_p})", ephemeral=True)
+    await interaction.response.send_message(f"✅ Đã điều chỉnh điểm của {user.mention}: **{amount:+}** điểm (Tổng: **{new_p}**)", ephemeral=True)
 
 @bot.tree.command(name="set_top_title", description="[ADMIN] Điều chỉnh danh hiệu Bảng Xếp Hạng")
 async def set_top_title(interaction: discord.Interaction, top: int, title: str, color_icon: str):
@@ -1043,7 +1185,7 @@ async def daily_leaderboard_update():
             if channel:
                 await channel.send("🌅 **[06:00 AM] CẬP NHẬT BẢNG XẾP HẠNG HẰNG NGÀY**", embed=embed)
         except Exception as e:
-            print(f"Error sending LB update: {e}")
+            print(f"Error sending LB update to channel {cid}: {e}")
 
 async def weekly_leaderboard_reset():
     conn = get_db()
@@ -1068,47 +1210,24 @@ async def weekly_leaderboard_reset():
     conn.commit()
     conn.close()
 
-# ==========================================
-# BOT EVENTS & STARTUP
-# ==========================================
-@bot.event
-async def on_ready():
-    print(f"✅ Bot đã đăng nhập thành công dưới tên: {bot.user}")
-    try:
-        synced = await bot.tree.sync()
-        print(f"🔄 Đã đồng bộ {len(synced)} lệnh Slash Commands.")
-    except Exception as e:
-        print(f"❌ Lỗi đồng bộ lệnh: {e}")
-
-    bot.add_view(ShopMainView())
-    bot.add_view(FishingView())
-
-    scheduler.add_job(daily_leaderboard_update, 'cron', hour=6, minute=0)
-    scheduler.add_job(weekly_leaderboard_reset, 'cron', day_of_week='sun', hour=23, minute=59)
-    scheduler.start()
 # =========================================================
 # SYSTEM: CHAT & VOICE REWARD LOGIC
 # =========================================================
-import time
-from discord.ext import tasks
-
-# Dictionary lưu cooldown chat của người dùng
 last_text_earn = {}
 
 @bot.event
-async def on_message(message):
-    # Khong tinh tin nhan tu bot hoac tin nhan riêng
+async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
 
     user_id = message.author.id
     current_time = time.time()
 
-    # Chat: Cooldown 10 giay -> Cong 10 diem
+    # Chat Cooldown: 10 giây -> Cộng 10 điểm
     if user_id not in last_text_earn or (current_time - last_text_earn[user_id]) >= 10:
         last_text_earn[user_id] = current_time
         
-        conn = sqlite3.connect("database.db")
+        conn = get_db()
         c = conn.cursor()
         c.execute(
             "INSERT INTO users (user_id, points) VALUES (?, 10) ON CONFLICT(user_id) DO UPDATE SET points = points + 10", 
@@ -1119,30 +1238,42 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# Task Voice: Chay dinh ky 10 giay 1 lan -> Cong 20 diem
+# Task Voice: Tối ưu hóa - Gom tất cả user vào 1 Lệnh Batch Update duy nhất
 @tasks.loop(seconds=10)
 async def voice_reward_task():
+    eligible_users = []
+    
     for guild in bot.guilds:
         for vc in guild.voice_channels:
-            for member in vc.members:
-                # Khong cong diem cho Bot, nguoi bi Mute Tai, hoac AFK
-                if member.bot or member.voice.self_deaf or member.voice.afk:
+            # Bỏ qua nếu là kênh AFK của Server
+            if guild.afk_channel and vc.id == guild.afk_channel.id:
+                continue
+
+            # Chỉ tính nếu trong room có từ 2 người dùng (không tính bot) trở lên
+            non_bot_members = [m for m in vc.members if not m.bot]
+            if len(non_bot_members) < 2:
+                continue
+
+            for member in non_bot_members:
+                # Bỏ qua nếu thành viên đang Mute Tai hoặc ở trạng thái AFK
+                if member.voice.self_deaf or member.voice.deaf or member.voice.afk:
                     continue
                 
-                user_id = member.id
-                conn = sqlite3.connect("database.db")
-                c = conn.cursor()
-                c.execute(
-                    "INSERT INTO users (user_id, points) VALUES (?, 20) ON CONFLICT(user_id) DO UPDATE SET points = points + 20", 
-                    (user_id,)
-                )
-                conn.commit()
-                conn.close()
+                eligible_users.append((member.id,))
+
+    if eligible_users:
+        conn = get_db()
+        c = conn.cursor()
+        c.executemany(
+            "INSERT INTO users (user_id, points) VALUES (?, 20) ON CONFLICT(user_id) DO UPDATE SET points = points + 20",
+            eligible_users
+        )
+        conn.commit()
+        conn.close()
 
 @voice_reward_task.before_loop
 async def before_voice_task():
     await bot.wait_until_ready()
-
 
 # =========================================================
 # BOT EVENTS & STARTUP
@@ -1151,23 +1282,33 @@ async def before_voice_task():
 async def on_ready():
     print(f"✅ Bot đã đăng nhập thành công dưới tên: {bot.user}")
     
-    # Kich hoat loop Voice an toan ben trong event loop
+    # Kích hoạt Voice Task
     if not voice_reward_task.is_running():
         voice_reward_task.start()
 
+    # Đồng bộ Slash Commands
     try:
         synced = await bot.tree.sync()
         print(f"🔄 Đã đồng bộ {len(synced)} lệnh Slash Commands.")
     except Exception as e:
         print(f"❌ Lỗi đồng bộ lệnh: {e}")
 
-    bot.add_view(ShopMainView())
-    bot.add_view(FishingView())
+    # Đăng ký Persistent Views nếu class tồn tại
+    try:
+        bot.add_view(ShopMainView())
+        bot.add_view(FishingView())
+    except NameError:
+        pass
 
-    scheduler.add_job(daily_leaderboard_update, 'cron', hour=6, minute=0)
-    scheduler.add_job(weekly_leaderboard_reset, 'cron', day_of_week='sun', hour=23, minute=59)
-    scheduler.start()
+    # Kích hoạt Scheduler
+    if not scheduler.running:
+        scheduler.add_job(daily_leaderboard_update, 'cron', hour=6, minute=0)
+        scheduler.add_job(weekly_leaderboard_reset, 'cron', day_of_week='sun', hour=23, minute=59)
+        scheduler.start()
 
 if __name__ == "__main__":
     token = os.getenv("DISCORD_BOT_TOKEN")
-    bot.run(token)
+    if not token:
+        print("❌ Chưa cấu hình DISCORD_BOT_TOKEN trong Environment Variables!")
+    else:
+        bot.run(token)
