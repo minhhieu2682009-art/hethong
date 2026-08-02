@@ -1324,7 +1324,13 @@ class InventorySelect(discord.ui.Select):
         
         category = shop_info[0].lower() if shop_info and shop_info[0] else ""
         effect_type = shop_info[1].lower() if shop_info and shop_info[1] else "none"
-        effect_value = shop_info[2] if shop_info and shop_info[2] else 0
+        raw_effect_val = shop_info[2] if shop_info and shop_info[2] is not None else 0
+
+        # Ép kiểu an toàn cho effect_value tránh lỗi so sánh str và int
+        try:
+            effect_value = float(raw_effect_val)
+        except (ValueError, TypeError):
+            effect_value = 0.0
 
         msg = ""
 
@@ -1381,8 +1387,8 @@ class InventorySelect(discord.ui.Select):
             if active_pet:
                 pet_id, pet_type, lvl, current_exp = active_pet
                 
-                # Lấy đúng số EXP thực tế từ shop (ví dụ 1100), nếu không có mới fallback về 150
-                exp_gain = int(effect_value) if effect_value and effect_value > 0 else 150
+                # Lấy đúng số EXP thực tế từ shop, nếu không có mới fallback về 150
+                exp_gain = int(effect_value) if effect_value > 0 else 150
                 current_exp += exp_gain
                 
                 leveled_up = False
@@ -1419,7 +1425,7 @@ class InventorySelect(discord.ui.Select):
         if "mồi" in item_name.lower() or effect_type == "bait":
             msg = f"🪱 Đã kích hoạt mồi **{item_name}** thành công! Sẵn sàng mang ra bờ sông câu cá (`/causong`)."
         elif effect_type == "add_points":
-            pts = int(effect_value) if effect_value else 100
+            pts = int(effect_value) if effect_value > 0 else 100
             update_points(user_id, pts)
             msg = f"💰 Bạn đã sử dụng **{item_name}** và nhận được `{pts}` Điểm!"
         else:
