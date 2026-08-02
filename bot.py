@@ -21,6 +21,8 @@ import sqlite3
 import random
 import asyncio
 from datetime import datetime, time, timedelta
+# Dictionary lưu thời gian chat gần nhất của từng user để tạo cooldown 5 giây
+chat_cooldowns = {}
 
 # ==========================================
 # 1. KHỞI TẠO BOT & DATABASE
@@ -483,36 +485,50 @@ async def nuoithu(interaction: discord.Interaction):
     view = PetMainView(user_id=user_id)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+
 # ==========================================
 # 4. TÍCH ĐIỂM CHAT & VOICE TỰ ĐỘNG
 # ==========================================
-voice_time_tracker = {}
 
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
-    # Cộng 2 điểm ngẫu nhiên mỗi khi chat
-    update_points(message.author.id, 2)
+    
+    user_id = message.author.id
+    now = datetime.now()
+    
+    # Kiểm tra cooldown 5 giây cho việc chat để tránh spam
+    if user_id in chat_cooldowns:
+        elapsed = (now - chat_cooldowns[user_id]).total_seconds()
+        if elapsed < 5:
+            # Vẫn cho phép bot xử lý các lệnh chữ/slash khác nhưng không cộng điểm
+            return await bot.process_commands(message)
+    
+    # Cập nhật mốc thời gian chat mới nhất và cộng 10 điểm
+    chat_cooldowns[user_id] = now
+    update_points(user_id, 10)
+    
     await bot.process_commands(message)
 
+# Vòng lặp chạy ngầm cứ mỗi 5 giây để cộng điểm voice (20 điểm/lần)
+@tasks.loop(seconds=5)
+async def reward_voice_users():
+    for guild in bot.guilds:
+        for channel in guild.voice_channels:
+            for member in channel.members:
+                # Bỏ qua bot và trường hợp người dùng bật mute/deafen tùy bạn (ở đây tính tất cả người trong phòng)
+                if member.bot:
+                    continue
+                # Cứ mỗi 5 giây trong voice nhận 20 điểm
+                update_points(member.id, 20)
+
+# Đừng quên khởi động vòng lặp voice này khi bot sẵn sàng (gắn vào sự kiện on_ready)
 @bot.event
-async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    if member.bot:
-        return
-    
-    # Vào voice chat
-    if before.channel is None and after.channel is not None:
-        voice_time_tracker[member.id] = datetime.now()
-    # Rời voice chat
-    elif before.channel is not None and after.channel is None:
-        join_time = voice_time_tracker.pop(member.id, None)
-        if join_time:
-            duration = (datetime.now() - join_time).total_seconds()
-            # Mỗi 1 phút voice cộng 5 điểm
-            earned_points = int((duration // 60) * 5)
-            if earned_points > 0:
-                update_points(member.id, earned_points)
+async def on_ready():
+    if not reward_voice_users.is_running():
+        reward_voice_users.start()
+    print(f"Bot đã đăng nhập thành công với tên {bot.user}")
 
 # ==========================================
 # 5. HỆ THỐNG /pvp_pet (THÁCH ĐẤU LINH THÚ)
@@ -1118,12 +1134,15 @@ class FishingView(discord.ui.View):
             conn.close()
 
         pts_str = f"+{f_pts}" if f_pts >= 0 else f"{f_pts}"
-        embed_win = discord.Embed(
-            title="🎣 CÂU CÁ THÀNH CÔNG!",
-            description=f"Bạn đã giật cần và bắt được:\n\n### {f_name}\n* **Phẩm cấp:** {f_rarity.upper()}\n* **Phần thưởng:** `{pts_str}` Điểm {title_msg}",
-            color=discord.Color.blue()
-        )
-        await interaction.response.send_message(embed=embed_win)
+    embed_win = discord.Embed(
+        title="🎣 CÂU CÁ THÀNH CÔNG!",
+        description=f"🎉 Chúc mừng {interaction.user.mention} đã xuất sắc giật cần và bắt được:\n\n"
+                    f"### {f_name}\n"
+                    f"* **Phẩm cấp:** {f_rarity.upper()}\n"
+                    f"* **Phần thưởng:** `{pts_str}` Điểm {title_msg}",
+        color=discord.Color.blue()
+    )
+    await interaction.response.send_message(embed=embed_win)
 
     @discord.ui.button(label="🎣 Chọn Cần Câu", style=discord.ButtonStyle.secondary, custom_id="btn_select_rod")
     async def select_rod_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
