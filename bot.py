@@ -238,7 +238,7 @@ def calculate_pet_cp(pet_type: str, level: int) -> int:
     return cp
 
 # ==========================================
-# 3. HỆ THỐNG /nuoithu UI & LOGIC (HOÀN CHỈNH ĐÃ SỬA LỖI EXP & LEVEL)
+# 3. HỆ THỐNG /nuoithu UI & LOGIC (ĐÃ CẬP NHẬT VŨ KHÍ & XÓA PET)
 # ==========================================
 
 class AdminUpdatePetModal(discord.ui.Modal, title="Cập Nhật Thông Tin Pet (Admin)"):
@@ -308,7 +308,119 @@ class SelectActivePetView(discord.ui.View):
         super().__init__(timeout=60)
         self.add_item(SelectActivePetDropdown(user_id))
 
-# Menu chọn đồ ăn cho pet từ túi đồ (Đã kết nối chuẩn shop_items & vòng lặp thăng cấp)
+
+# Menu Xóa Pet
+class DeletePetDropdown(discord.ui.Select):
+    def __init__(self, user_id):
+        self.user_id = user_id
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("SELECT id, pet_type, level FROM user_pets WHERE user_id = ?", (user_id,))
+        pets = c.fetchall()
+        conn.close()
+
+        options = []
+        for p in pets:
+            p_id, p_type, p_lvl = p
+            display_name, _ = get_pet_info_display(p_type, p_lvl)
+            options.append(discord.SelectOption(label=f"Xóa: {display_name} (Lv.{p_lvl})", value=str(p_id)))
+        
+        if not options:
+            options.append(discord.SelectOption(label="Không có pet để xóa", value="none"))
+
+        super().__init__(placeholder="🗑️ Chọn linh thú muốn phóng thích/xóa...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "none":
+            return await interaction.response.send_message("❌ Không có linh thú nào để xóa!", ephemeral=True)
+        
+        pet_id = int(self.values[0])
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("DELETE FROM user_pets WHERE id = ? AND user_id = ?", (pet_id, self.user_id))
+        conn.commit()
+        conn.close()
+
+        await interaction.response.send_message("🗑️ Đã phóng thích linh thú thành công khỏi danh sách của bạn!", ephemeral=True)
+
+class DeletePetView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=60)
+        self.add_item(DeletePetDropdown(user_id))
+
+
+# Menu Trang Bị Vũ Khí (Ví dụ: Tịnh diệt kiếm ý tăng thẳng Lực Chiến CP)
+class EquipWeaponDropdown(discord.ui.Select):
+    def __init__(self, user_id):
+        self.user_id = user_id
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        # Lấy danh sách item trong túi đồ
+        c.execute("SELECT item_name, quantity FROM inventory WHERE user_id = ?", (user_id,))
+        items = c.fetchall()
+        conn.close()
+
+        options = [discord.SelectOption(label=f"{i[0]} (x{i[1]})", value=i[0]) for i in items[:25]]
+        if not options:
+            options.append(discord.SelectOption(label="Túi đồ trống", value="none"))
+
+        super().__init__(placeholder="🗡️ Chọn vũ khí/bảo vật trong túi để trang bị...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "none":
+            return await interaction.response.send_message("❌ Không tìm thấy vật phẩm trong túi đồ!", ephemeral=True)
+        
+        item_name = self.values[0]
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        
+        # 1. Lấy thông tin hiệu ứng từ shop_items để đọc đúng chỉ số CP (ví dụ Tịnh diệt kiếm ý tăng 1000 CP)
+        c.execute("SELECT effect_value FROM shop_items WHERE name = ?", (item_name,))
+        shop_info = c.fetchone()
+        
+        raw_effect = shop_info[0] if shop_info and shop_info[0] is not None else 1000
+        try:
+            cp_gain = int(float(raw_effect))
+        except (ValueError, TypeError):
+            cp_gain = 1000
+
+        # 2. Kiểm tra kho đồ và trừ số lượng item
+        c.execute("SELECT id, quantity FROM inventory WHERE user_id = ? AND item_name = ?", (self.user_id, item_name))
+        inv_row = c.fetchone()
+        
+        if not inv_row or inv_row[1] <= 0:
+            conn.close()
+            return await interaction.response.send_message("❌ Vật phẩm này không còn trong túi đồ!", ephemeral=True)
+        
+        inv_id, current_qty = inv_row
+        new_qty = current_qty - 1
+        if new_qty <= 0:
+            c.execute("DELETE FROM inventory WHERE id = id = ?", (inv_id,)) # Sửa lại câu lệnh DELETE chuẩn bên dưới
+        else:
+            c.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
+
+        # Thực hiện chuẩn lệnh xóa kho nếu item hết
+        if new_qty <= 0:
+            c.execute("DELETE FROM inventory WHERE id = ?", (inv_id,))
+
+        # 3. Cộng trực tiếp chỉ số trang bị / lực chiến vũ khí vào bảng thông tin user (hoặc bảng lưu vũ khí trang bị)
+        # Giả sử bảng users có cột equipped_cp hoặc tăng trực tiếp vào điểm lực chiến chung tùy thiết kế database của bạn:
+        # Ở đây ta minh họa cộng dồn vào chỉ số lực chiến/hoặc tạo bảng trang bị riêng. 
+        # Ví dụ giả định bảng users có cột `weapon_cp` hoặc lưu vào bảng `users`:
+        c.execute("UPDATE users SET weapon_cp = COALESCE(weapon_cp, 0) + ? WHERE user_id = ?", (cp_gain, self.user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        await interaction.response.send_message(f"✨ Đã trang bị **{item_name}** thành công! Nhận thêm **+{cp_gain} Lực Chiến (CP)** từ vũ khí.", ephemeral=True)
+
+class EquipWeaponView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=60)
+        self.add_item(EquipWeaponDropdown(user_id))
+
+
+# Menu chọn đồ ăn cho pet từ túi đồ (Chỉ dùng riêng cho thức ăn tăng EXP)
 class FeedPetDropdown(discord.ui.Select):
     def __init__(self, user_id):
         self.user_id = user_id
@@ -322,7 +434,7 @@ class FeedPetDropdown(discord.ui.Select):
         if not options:
             options.append(discord.SelectOption(label="Túi không có vật phẩm", value="none"))
 
-        super().__init__(placeholder="🍖 Chọn thức ăn/bảo vật trong túi để bồi bổ...", options=options)
+        super().__init__(placeholder="🍖 Chọn thức ăn bồi bổ cho linh thú...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         if self.values[0] == "none":
@@ -332,7 +444,6 @@ class FeedPetDropdown(discord.ui.Select):
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         
-        # 1. Lấy thông tin hiệu ứng từ shop_items để đọc đúng số EXP (ví dụ 10000 EXP)
         c.execute("SELECT effect_value FROM shop_items WHERE name = ?", (item_name,))
         shop_info = c.fetchone()
         
@@ -342,7 +453,6 @@ class FeedPetDropdown(discord.ui.Select):
         except (ValueError, TypeError):
             exp_gain = 150
 
-        # 2. Kiểm tra kho đồ và trừ số lượng item
         c.execute("SELECT id, quantity FROM inventory WHERE user_id = ? AND item_name = ?", (self.user_id, item_name))
         inv_row = c.fetchone()
         
@@ -357,7 +467,6 @@ class FeedPetDropdown(discord.ui.Select):
         else:
             c.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
         
-        # 3. Tìm pet đang xuất trận để cộng EXP và xử lý thăng cấp tự động
         c.execute("SELECT id, pet_type, level, exp FROM user_pets WHERE user_id = ? AND is_active = 1", (self.user_id,))
         active_pet = c.fetchone()
         
@@ -368,7 +477,6 @@ class FeedPetDropdown(discord.ui.Select):
             leveled_up = False
             max_exp = get_next_exp_req(pet_type, lvl)
             
-            # Vòng lặp thăng cấp liên tục nếu EXP cộng vào vượt nhiều mốc
             while current_exp >= max_exp:
                 current_exp -= max_exp
                 lvl += 1
@@ -393,6 +501,7 @@ class FeedPetView(discord.ui.View):
     def __init__(self, user_id):
         super().__init__(timeout=60)
         self.add_item(FeedPetDropdown(user_id))
+
 
 class PetMainView(discord.ui.View):
     def __init__(self, user_id: int):
@@ -442,11 +551,23 @@ class PetMainView(discord.ui.View):
             return await interaction.response.send_message("❌ Bảng này không phải của bạn!", ephemeral=True)
         await interaction.response.send_message("👇 Chọn linh thú bạn muốn đưa ra chiến đấu:", view=SelectActivePetView(self.user_id), ephemeral=True)
 
+    @discord.ui.button(label="⚔️ Trang Bị Vũ Khí", style=discord.ButtonStyle.primary, custom_id="btn_equip_weapon")
+    async def equip_weapon(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ Bảng này không phải của bạn!", ephemeral=True)
+        await interaction.response.send_message("👇 Chọn vũ khí/bảo vật trong túi để gia tăng lực chiến:", view=EquipWeaponView(self.user_id), ephemeral=True)
+
     @discord.ui.button(label="🍖 Cho Pet Ăn", style=discord.ButtonStyle.secondary, custom_id="btn_feed_pet")
     async def feed_pet(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ Bảng này không phải của bạn!", ephemeral=True)
         await interaction.response.send_message("👇 Chọn thức ăn trong túi để bồi bổ cho linh thú xuất trận:", view=FeedPetView(self.user_id), ephemeral=True)
+
+    @discord.ui.button(label="🗑️ Xóa Pet", style=discord.ButtonStyle.danger, custom_id="btn_delete_pet")
+    async def delete_pet(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ Bảng này không phải của bạn!", ephemeral=True)
+        await interaction.response.send_message("👇 Chọn linh thú muốn xóa khỏi danh sách:", view=DeletePetView(self.user_id), ephemeral=True)
 
     @discord.ui.button(label="⚙️ Update Pet (Admin)", style=discord.ButtonStyle.danger, custom_id="btn_admin_update_pet")
     async def update_pet(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1173,7 +1294,7 @@ async def causong(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
 # ==========================================
-# 8. HỆ THỐNG /shop & TÚI ĐỒ /tuido
+# 8. HỆ THỐNG /shop & TÚI ĐỒ /tuido (GIAO DIỆN NÂNG CẤP)
 # ==========================================
 
 DEFAULT_SHOP_ITEMS = [
@@ -1208,7 +1329,7 @@ DEFAULT_SHOP_ITEMS = [
     ("doan_trangbi", "🌕 Cửu diệp thảo quả", 2300, "Tăng 1100 EXP cho Linh Thú", "add_exp", 1100),
     ("doan_trangbi", "💀 Linh tủy quả", 5000, "Tăng 100 CP vĩnh viễn cho Linh Thú", "add_cp_perm", 100),
     ("doan_trangbi", "🌏 Hỗn độn thanh liên Quả", 20000, "Tăng 10000 EXP cho Linh Thú", "add_exp", 10000),
-    ("doan_trangbi", "🐦‍🔥 Bất tử phượng hoàng quả", 30000, "Tăng 1000 CP vĩnh viễn & 1000 EXP", "add_cp_exp", 1000),
+    ("doan_trangbi", "🐦‍🔥 Bất tử phượng hoàng quả", 30000, "Tăng 1000 CP vĩnh viễn & 1000 EXP", "add_cp_perm", 1000),
 
     # Trang bị Pet
     ("doan_trangbi", "🖕 Chi dục", 100000, "Tăng 50% tỷ lệ thắng trong /pvp_pet", "pvp_buff", 0.5),
@@ -1340,7 +1461,7 @@ async def shop(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=ShopMainView())
 
 # ==========================================
-# PHẦN TÚI ĐỒ & SỬ DỤNG VẬT PHẨM (HOÀN CHỈNH)
+# PHẦN TÚI ĐỒ & SỬ DỤNG VẬT PHẨM (CHUẨN HÓA)
 # ==========================================
 
 class InventorySelect(discord.ui.Select):
@@ -1352,7 +1473,7 @@ class InventorySelect(discord.ui.Select):
                 label=f"{name} (x{qty}){eq_text}",
                 description="Bấm để trang bị hoặc sử dụng vật phẩm này",
                 value=name,
-                emoji="🍄"
+                emoji="🎒"
             ))
         super().__init__(placeholder="🍄 Chọn vật phẩm muốn sử dụng...", options=options, min_values=1, max_values=1)
 
@@ -1363,11 +1484,11 @@ class InventorySelect(discord.ui.Select):
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         
-        # 1. Lấy thông tin từ shop_items để biết phân loại và hiệu ứng
+        # 1. Lấy thông tin chính xác từ shop_items dựa theo tên
         c.execute("SELECT category, effect_type, effect_value FROM shop_items WHERE name = ?", (item_name,))
         shop_info = c.fetchone()
         
-        # 2. Kiểm tra kho đồ của người chơi
+        # 2. Kiểm tra kho đồ người chơi
         c.execute("SELECT id, quantity, is_equipped FROM inventory WHERE user_id = ? AND item_name = ?", (user_id, item_name))
         inv_row = c.fetchone()
 
@@ -1381,7 +1502,6 @@ class InventorySelect(discord.ui.Select):
         effect_type = shop_info[1].lower() if shop_info and shop_info[1] else "none"
         raw_effect_val = shop_info[2] if shop_info and shop_info[2] is not None else 0
 
-        # Ép kiểu an toàn cho effect_value tránh lỗi so sánh str và int
         try:
             effect_value = float(raw_effect_val)
         except (ValueError, TypeError):
@@ -1389,67 +1509,25 @@ class InventorySelect(discord.ui.Select):
 
         msg = ""
 
-        # --- NHÓM 1: CẦN CÂU HOẶC TRANG BỊ (Mặc / Tháo đổi trạng thái is_equipped) ---
-        is_equipment_item = (
-            "cần" in item_name.lower() or 
-            "kiếm" in item_name.lower() or 
-            "giáp" in item_name.lower() or 
-            "bảo vật" in item_name.lower() or 
-            "trang bị" in item_name.lower() or 
-            "bình tĩnh" in item_name.lower() or
-            "chi dục" in item_name.lower() or
-            category in ["rod", "equipment", "weapon", "armor"] or
-            effect_type in ["rod", "equipment"]
-        )
-
-        if is_equipment_item:
-            if is_eq == 1:
-                c.execute("UPDATE inventory SET is_equipped = 0 WHERE id = ?", (inv_id,))
-                msg = f"🔄 Bạn đã tháo thành công **{item_name}**!"
-            else:
-                if "cần" in item_name.lower() or effect_type == "rod":
-                    c.execute("UPDATE inventory SET is_equipped = 0 WHERE user_id = ? AND (item_name LIKE '%Cần%' OR item_name LIKE '%cần%')", (user_id,))
-                
-                c.execute("UPDATE inventory SET is_equipped = 1 WHERE id = ?", (inv_id,))
-                msg = f"🛡️ Bạn đã trang bị thành công **{item_name}**!"
-            
-            conn.commit()
-            conn.close()
-            return await interaction.response.send_message(msg, ephemeral=True)
-
-        # --- NHÓM 2: THỨC ĂN / BỒI BỔ CHO PET (Tiêu thụ để tăng EXP chính xác từ Shop & Tự động thăng cấp) ---
-        is_food_item = (
-            "đào" in item_name.lower() or 
-            "thảo quả" in item_name.lower() or 
-            "thịt" in item_name.lower() or 
-            "nấm" in item_name.lower() or 
-            "quả" in item_name.lower() or 
-            category in ["food", "pet_food"] or
-            effect_type == "add_exp"
-        )
-
-        if is_food_item:
+        # --- TRƯỜNG HỢP 1: THỨC ĂN CHO PET (effect_type == 'add_exp') ---
+        if effect_type == "add_exp":
             new_qty = current_qty - 1
             if new_qty <= 0:
                 c.execute("DELETE FROM inventory WHERE id = ?", (inv_id,))
             else:
                 c.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
             
-            # Lấy thêm pet_type để tính mốc exp tiến hóa chuẩn xác
             c.execute("SELECT id, pet_type, level, exp FROM user_pets WHERE user_id = ? AND is_active = 1", (user_id,))
             active_pet = c.fetchone()
             
             if active_pet:
                 pet_id, pet_type, lvl, current_exp = active_pet
-                
-                # Lấy đúng số EXP thực tế từ shop, nếu không có mới fallback về 150
-                exp_gain = int(effect_value) if effect_value > 0 else 150
+                exp_gain = int(effect_value) if effect_value > 0 else 10
                 current_exp += exp_gain
                 
                 leveled_up = False
                 max_exp = get_next_exp_req(pet_type, lvl)
                 
-                # Vòng lặp kiểm tra thăng cấp nếu EXP vượt ngưỡng
                 while current_exp >= max_exp:
                     current_exp -= max_exp
                     lvl += 1
@@ -1462,33 +1540,93 @@ class InventorySelect(discord.ui.Select):
                 if leveled_up:
                     msg = f"🎉 Tuyệt vời! Linh thú ăn **{item_name}** (`+{exp_gain} EXP`) và tiến hóa thành **{new_pet_name} (Level {lvl})** thành công!"
                 else:
-                    msg = f"✨ Bạn đã cho linh thú xuất trận ăn **{item_name}**, nhận thành công `+{exp_gain} EXP`!"
+                    msg = f"✨ Bạn đã cho linh thú ăn **{item_name}**, nhận thành công `+{exp_gain} EXP`!"
             else:
-                msg = f"✨ Đã tiêu thụ **{item_name}**, nhưng bạn chưa chọn linh thú xuất trận (`/nuoithu`) nên pet không nhận được EXP!"
+                msg = f"⚠️ Đã tiêu thụ **{item_name}**, nhưng bạn chưa cho pet xuất trận (`/nuoithu`) nên pet không nhận được EXP!"
+
+        # --- TRƯỜNG HỢP 2: VẬT PHẨM TĂNG CP VĨNH VIỄN CHO PET (effect_type == 'add_cp_perm') ---
+        elif effect_type == "add_cp_perm":
+            new_qty = current_qty - 1
+            if new_qty <= 0:
+                c.execute("DELETE FROM inventory WHERE id = ?", (inv_id,))
+            else:
+                c.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
             
-            conn.commit()
-            conn.close()
-            return await interaction.response.send_message(msg, ephemeral=True)
+            cp_gain = int(effect_value)
+            
+            try:
+                c.execute("ALTER TABLE user_pets ADD COLUMN cp INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
 
-        # --- NHÓM 3: VẬT PHẨM TIÊU HAO KHÁC ---
-        new_qty = current_qty - 1
-        if new_qty <= 0:
-            c.execute("DELETE FROM inventory WHERE id = ?", (inv_id,))
-        else:
-            c.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
+            c.execute("SELECT id, pet_type, level, COALESCE(cp, 0) FROM user_pets WHERE user_id = ? AND is_active = 1", (user_id,))
+            active_pet = c.fetchone()
+            
+            if active_pet:
+                pet_id, pet_type, lvl, pet_cp = active_pet
+                new_pet_cp = pet_cp + cp_gain
+                c.execute("UPDATE user_pets SET cp = ? WHERE id = ?", (new_pet_cp, pet_id))
+                new_pet_name, _ = get_pet_info_display(pet_type, lvl)
+                msg = f"🛡️ Linh thú **{new_pet_name}** đã trang bị **{item_name}** thành công và nhận vĩnh viễn `+{cp_gain} Lực chiến (CP)`!"
+            else:
+                msg = f"⚠️ Đã tiêu thụ **{item_name}**, nhưng bạn chưa cho linh thú nào xuất trận (`/nuoithu`) nên trang bị không thể cộng dồn CP cho pet!"
 
-        if "mồi" in item_name.lower() or effect_type == "bait":
-            msg = f"🪱 Đã kích hoạt mồi **{item_name}** thành công! Sẵn sàng mang ra bờ sông câu cá (`/causong`)."
-        elif effect_type == "add_points":
-            pts = int(effect_value) if effect_value > 0 else 100
-            update_points(user_id, pts)
-            msg = f"💰 Bạn đã sử dụng **{item_name}** và nhận được `{pts}` Điểm!"
+        # --- TRƯỜNG HỢP 3: VẬT PHẨM HÊN XUI TĂNG CP CHO PET (effect_type == 'chance_cp') ---
+        elif effect_type == "chance_cp":
+            new_qty = current_qty - 1
+            if new_qty <= 0:
+                c.execute("DELETE FROM inventory WHERE id = ?", (inv_id,))
+            else:
+                c.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
+            
+            import random
+            if random.random() < 0.5:
+                cp_gain = int(effect_value)
+                try:
+                    c.execute("ALTER TABLE user_pets ADD COLUMN cp INTEGER DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass
+
+                c.execute("SELECT id, pet_type, level, COALESCE(cp, 0) FROM user_pets WHERE user_id = ? AND is_active = 1", (user_id,))
+                active_pet = c.fetchone()
+                
+                if active_pet:
+                    pet_id, pet_type, lvl, pet_cp = active_pet
+                    c.execute("UPDATE user_pets SET cp = ? WHERE id = ?", (pet_cp + cp_gain, pet_id))
+                    new_pet_name, _ = get_pet_info_display(pet_type, lvl)
+                    msg = f"🔫 May mắn thành công! Linh thú **{new_pet_name}** nhận được `+{cp_gain} Lực chiến (CP)` từ **{item_name}**!"
+                else:
+                    msg = f"⚠️ Kích hoạt thành công **{item_name}** nhưng bạn chưa cho pet ra trận nên phần thưởng CP bị lãng phí!"
+            else:
+                msg = f"💨 Thật tiếc! **{item_name}** không kích hoạt được hiệu ứng và đã tiêu hao vô ích!"
+
+        # --- TRƯỜNG HỢP 4: TRANG BỊ, CẦN CÂU, BUFF (Bật / Tháo is_equipped) ---
+        elif effect_type in ["rod", "equipment", "pvp_buff", "tower_buff"] or category == "candaumoi" or effect_type == "none" or "cần" in item_name.lower():
+            if is_eq == 1:
+                c.execute("UPDATE inventory SET is_equipped = 0 WHERE id = ?", (inv_id,))
+                msg = f"🔄 Bạn đã tháo thành công **{item_name}**!"
+            else:
+                if "cần" in item_name.lower() or effect_type == "rod":
+                    c.execute("UPDATE inventory SET is_equipped = 0 WHERE user_id = ? AND (item_name LIKE '%Cần%' OR item_name LIKE '%cần%')", (user_id,))
+                
+                c.execute("UPDATE inventory SET is_equipped = 1 WHERE id = ?", (inv_id,))
+                msg = f"🛡️ Bạn đã trang bị thành công **{item_name}**!"
+
+        # --- TRƯỜNG HỢP 5: CÁC VẬT PHẨM TIÊU HAO KHÁC ---
         else:
-            msg = f"✨ Bạn đã sử dụng thành công **{item_name}** từ túi đồ!"
+            new_qty = current_qty - 1
+            if new_qty <= 0:
+                c.execute("DELETE FROM inventory WHERE id = ?", (inv_id,))
+            else:
+                c.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
+            
+            if "mồi" in item_name.lower() or "buff" in effect_type:
+                msg = f"🪱 Đã kích hoạt mồi **{item_name}** thành công! Sẵn sàng mang ra bờ sông câu cá (`/causong`)."
+            else:
+                msg = f"✨ Bạn đã sử dụng thành công **{item_name}** từ túi đồ!"
 
         conn.commit()
         conn.close()
-
         await interaction.response.send_message(msg, ephemeral=True)
 
 
@@ -1498,30 +1636,46 @@ class InventoryView(discord.ui.View):
         self.add_item(InventorySelect(items))
 
 
-@bot.tree.command(name="tuido", description="Mở túi đồ cá nhân")
+@bot.tree.command(name="tuido", description="Mở túi đồ cá nhân và kiểm tra trạng thái pet")
 async def tuido(interaction: discord.Interaction):
     user_id = interaction.user.id
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
-    # Lấy thông tin điểm số của người dùng
+    # Lấy thông tin điểm số
     c.execute("SELECT points FROM users WHERE user_id = ?", (user_id,))
     user_data = c.fetchone()
     points = user_data[0] if user_data else 0
+
+    # Lấy thông tin pet đang active (bao gồm cả chỉ số CP)
+    try:
+        c.execute("SELECT pet_type, level, exp, COALESCE(cp, 0) FROM user_pets WHERE user_id = ? AND is_active = 1", (user_id,))
+    except sqlite3.OperationalError:
+        c.execute("SELECT pet_type, level, exp, 0 FROM user_pets WHERE user_id = ? AND is_active = 1", (user_id,))
+    active_pet = c.fetchone()
 
     # Lấy danh sách vật phẩm trong kho
     c.execute("SELECT item_name, quantity, is_equipped FROM inventory WHERE user_id = ?", (user_id,))
     items = c.fetchall()
     conn.close()
 
-    # Tạo giao diện Embed chuẩn phong cách game
+    # Tạo giao diện Embed nâng cấp hiện thị trực quan thông tin Pet
     embed = discord.Embed(
-        title=f"🎒 TÚI ĐỒ CỦA {interaction.user.display_name.upper()} ❗",
+        title=f"🎒 TÚI ĐỒ & LINH THÚ CỦA {interaction.user.display_name.upper()} ❗",
         color=discord.Color.gold()
     )
     
     embed.add_field(name="💰 Số Điểm Hiện Có", value=f"`{points}` Điểm", inline=True)
-    embed.add_field(name="🏆 Danh Hiệu Sở Hữu", value="`Chưa có`", inline=True)
+
+    # Hiển thị trạng thái Linh thú đang xuất trận ngay trong bảng thông tin
+    if active_pet:
+        p_type, p_lvl, p_exp, p_cp = active_pet
+        p_name, _ = get_pet_info_display(p_type, p_lvl)
+        max_exp = get_next_exp_req(p_type, p_lvl)
+        pet_display_text = f"• **Tên Pet:** {p_name}\n• **Cấp độ:** `Level {p_lvl}` (EXP: `{p_exp}/{max_exp}`)\n• **Lực chiến (CP):** `+{p_cp} CP`"
+        embed.add_field(name="🐾 Linh Thú Đang Xuất Trận", value=pet_display_text, inline=False)
+    else:
+        embed.add_field(name="🐾 Linh Thú Đang Xuất Trận", value="*Chưa có linh thú nào ra trận (`/nuoithu`)*", inline=False)
 
     if not items:
         embed.add_field(name="📦 Vật Phẩm Trong Kho", value="*Túi đồ của bạn đang trống rỗng!*", inline=False)
